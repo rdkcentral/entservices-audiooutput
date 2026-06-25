@@ -34,7 +34,6 @@ namespace Plugin {
 
     class AudioOutputImplementation
         : public Exchange::IAudioOutput
-        , public PluginHost::IPlugin::INotification
         , public Exchange::Dolby::IOutput::INotification {
 
     public:
@@ -46,7 +45,6 @@ namespace Plugin {
 
         BEGIN_INTERFACE_MAP(AudioOutputImplementation)
         INTERFACE_ENTRY(Exchange::IAudioOutput)
-        INTERFACE_ENTRY(PluginHost::IPlugin::INotification)
         INTERFACE_ENTRY(Exchange::Dolby::IOutput::INotification)
         END_INTERFACE_MAP
 
@@ -54,9 +52,6 @@ namespace Plugin {
         Core::hresult DolbyAtmosExperience(bool& enabled /* @out */) const override;
         void Register(Exchange::IAudioOutput::INotification* notification) override;
         void Unregister(const Exchange::IAudioOutput::INotification* notification) override;
-
-        // IPlugin::INotification — monitors PlayerInfo and DisplaySettings lifecycle
-        void StateChange(PluginHost::IShell* plugin) override;
 
         // Dolby::IOutput::INotification — receives audioModeChanged from PlayerInfo
         void AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled) override;
@@ -73,11 +68,11 @@ namespace Plugin {
 
         bool EvaluateCurrentAtmosExperience() const;
 
-        void NotifyObservers(bool dolbyAtmosExperience);
+        void SendNotify(bool dolbyAtmosExperience);
         void InitializePlayerInfo();
         void InitializeDisplaySettings();
         void UpdateCache();
-        void onAtmosCapabilityChangedHandler(const JsonObject& parameters);
+        void onAtmosCapabilityChanged(const JsonObject& parameters);
 
     private:
         mutable Core::CriticalSection _adminLock;

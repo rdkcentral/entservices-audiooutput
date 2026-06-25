@@ -74,8 +74,6 @@ namespace Plugin {
         _service = service;
         _service->AddRef();
 
-        _service->Register(this);
-
         InitializePlayerInfo();
         InitializeDisplaySettings();
         UpdateCache();
@@ -106,7 +104,7 @@ namespace Plugin {
             LOGERR("JSONRPC: %s: initialization failed", DISPLAYSETTINGS_CALLSIGN_VER);
         } else {
             _displaySettingsClient->Subscribe<JsonObject>(1000, _T("onAtmosCapabilityChanged"),
-                &AudioOutputImplementation::onAtmosCapabilityChangedHandler, this);
+                &AudioOutputImplementation::onAtmosCapabilityChanged, this);
         }
     }
 
@@ -148,7 +146,6 @@ namespace Plugin {
         }
 
         if (_service != nullptr) {
-            _service->Unregister(this);
             _service->Release();
             _service = nullptr;
         }
@@ -174,84 +171,35 @@ namespace Plugin {
 
     void AudioOutputImplementation::Register(Exchange::IAudioOutput::INotification* notification)
     {
-        ASSERT(notification != nullptr);
+        ASSERT(nullptr != notification);
+
         _adminLock.Lock();
-        ASSERT(std::find(_observers.begin(), _observers.end(), notification) == _observers.end());
-        _observers.push_back(notification);
-        notification->AddRef();
+
+        if (std::find(_observers.begin(), _observers.end(), notification) == _observers.end()) {
+            _observers.push_back(notification);
+            notification->AddRef();
+        } else {
+            LOGERR("same notification is registered already");
+        }
+
         _adminLock.Unlock();
     }
 
     void AudioOutputImplementation::Unregister(const Exchange::IAudioOutput::INotification* notification)
     {
-        ASSERT(notification != nullptr);
+        ASSERT(nullptr != notification);
+
         _adminLock.Lock();
-        auto index = std::find(_observers.begin(), _observers.end(), notification);
-        ASSERT(index != _observers.end());
-        if (index != _observers.end()) {
-            (*index)->Release();
-            _observers.erase(index);
+
+        auto itr = std::find(_observers.begin(), _observers.end(), notification);
+        if (itr != _observers.end()) {
+            (*itr)->Release();
+            _observers.erase(itr);
+        } else {
+            LOGERR("notification not found");
         }
+
         _adminLock.Unlock();
-    }
-
-    // -------------------------------------------------------------------------
-    // IPlugin::INotification::StateChange
-    // -------------------------------------------------------------------------
-
-    void AudioOutputImplementation::StateChange(PluginHost::IShell* plugin)
-    {
-        ASSERT(plugin != nullptr);
-
-        const string& callsign = plugin->Callsign();
-
-        if (plugin->State() == PluginHost::IShell::ACTIVATED) {
-
-            if (callsign == PLAYERINFO_CALLSIGN) {
-                LOGINFO("AudioOutputImplementation: PlayerInfo ACTIVATED — acquiring interface");
-                _playerInfo = plugin->QueryInterface<Exchange::Dolby::IOutput>();
-                if (_playerInfo != nullptr) {
-                    _playerInfo->Register(this);
-
-                    bool cap = false;
-                    if (AtmosMetadata(cap) == Core::ERROR_NONE) {
-                        _adminLock.Lock();
-                        _atmosMetaData = cap;
-                        bool newValue = EvaluateCurrentAtmosExperience();
-                        bool changed = (newValue != _dolbyAtmosExperience);
-                        _dolbyAtmosExperience = newValue;
-                        _adminLock.Unlock();
-                        if (changed) {
-                            NotifyObservers(newValue);
-                        }
-                    }
-
-                    Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
-                    if (SoundMode(mode) == Core::ERROR_NONE) {
-                        _adminLock.Lock();
-                        _soundMode = mode;
-                        bool newValue = EvaluateCurrentAtmosExperience();
-                        bool changed = (newValue != _dolbyAtmosExperience);
-                        _dolbyAtmosExperience = newValue;
-                        _adminLock.Unlock();
-                        if (changed) {
-                            NotifyObservers(newValue);
-                        }
-                    }
-                }
-            }
-
-        } else if (plugin->State() == PluginHost::IShell::DEACTIVATED) {
-
-            if (callsign == PLAYERINFO_CALLSIGN) {
-                LOGINFO("AudioOutputImplementation: PlayerInfo DEACTIVATED — releasing interface");
-                if (_playerInfo != nullptr) {
-                    _playerInfo->Unregister(this);
-                    _playerInfo->Release();
-                    _playerInfo = nullptr;
-                }
-            }
-        }
     }
 
     // -------------------------------------------------------------------------
@@ -259,9 +207,7 @@ namespace Plugin {
     // Received when PlayerInfo detects an audio mode change
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::AudioModeChanged(
-        const Exchange::Dolby::IOutput::SoundModes mode,
-        const bool /*enabled*/)
+    void AudioOutputImplementation::AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enable)
     {
         LOGINFO("AudioOutputImplementation::AudioModeChanged: mode=%d", static_cast<int>(mode));
 
@@ -275,7 +221,7 @@ namespace Plugin {
         if (changed) {
             LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
-            NotifyObservers(newValue);
+            SendNotify(newValue);
         }
     }
 
@@ -284,14 +230,10 @@ namespace Plugin {
     // JSON-RPC event handler for DisplaySettings onAtmosCapabilityChanged
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::onAtmosCapabilityChangedHandler(const JsonObject& parameters)
+    void AudioOutputImplementation::onAtmosCapabilityChanged(const JsonObject& parameters)
     {
-        string message;
-        parameters.ToString(message);
-        LOGINFO("AudioOutputImplementation::onAtmosCapabilityChangedHandler: %s", message.c_str());
-
         if (!parameters.HasLabel("currentAtmosCapability")) {
-            LOGERR("AudioOutputImplementation: onAtmosCapabilityChangedHandler: missing currentAtmosCapability");
+            LOGERR("AudioOutputImplementation: onAtmosCapabilityChanged: missing currentAtmosCapability");
             return;
         }
 
@@ -312,23 +254,24 @@ namespace Plugin {
         if (changed) {
             LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
-            NotifyObservers(newValue);
+            SendNotify(newValue);
         }
     }
 
     // -------------------------------------------------------------------------
-    // Private: NotifyObservers
+    // Private: SendNotify
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::NotifyObservers(bool dolbyAtmosExperience)
+    void AudioOutputImplementation::SendNotify(bool dolbyAtmosExperience)
     {
         _adminLock.Lock();
-        std::list<Exchange::IAudioOutput::INotification*> copyObservers(_observers);
-        _adminLock.Unlock();
+        std::list<Exchange::IAudioOutput::INotification*> index(_observers);
 
-        for (auto* observer : copyObservers) {
-            observer->OnDolbyAtmosExperienceChanged(dolbyAtmosExperience);
+        for (auto* itr : index) {
+            itr->OnDolbyAtmosExperienceChanged(dolbyAtmosExperience);
         }
+
+        _adminLock.Unlock();
     }
 
     // -------------------------------------------------------------------------
@@ -352,8 +295,13 @@ namespace Plugin {
             return false;
         }
     }
-    
-  uint32_t AtmosMetadata(bool& supported /* @out */) const override
+
+    // -------------------------------------------------------------------------
+    // Private: AtmosMetadata
+    // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
+    // -------------------------------------------------------------------------
+
+    uint32_t AudioOutputImplementation::AtmosMetadata(bool& supported) const
     {
         dsATMOSCapability_t atmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
         supported = false;
@@ -393,9 +341,14 @@ namespace Plugin {
         return (Core::ERROR_NONE);
     }
 
-    uint32_t SoundMode(Exchange::Dolby::IOutput::SoundModes& mode /* @out */) const override
+    // -------------------------------------------------------------------------
+    // Private: SoundMode
+    // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
+    // -------------------------------------------------------------------------
+
+    uint32_t AudioOutputImplementation::SoundMode(Exchange::Dolby::IOutput::SoundModes& mode) const
     {
-        mode = UNKNOWN;
+        mode = Exchange::Dolby::IOutput::UNKNOWN;
         std::vector<std::string> hdmiArcPorts, hdmiPorts, speakerPorts, spdifPorts, headphonePorts;
 
         try {
@@ -436,11 +389,11 @@ namespace Plugin {
                 device::AudioOutputPort aPort = device::Host::getInstance().getAudioOutputPort(selectedPort);
                 if (aPort.isConnected()) {
                     device::AudioStereoMode soundmode = aPort.getStereoMode();
-                    mode = dsAudioModeToSoundMode(soundmode);
+                    mode = DsAudioModeToSoundMode(soundmode);
                     // Auto mode for HDMI ARC and SPDIF
                     if ((aPort.getType().getId() == device::AudioOutputPortType::kARC || aPort.getType().getId() == device::AudioOutputPortType::kSPDIF)
                             && aPort.getStereoAuto()) {
-                        mode = SOUNDMODE_AUTO;
+                        mode = Exchange::Dolby::IOutput::SOUNDMODE_AUTO;
                     }
                     LOGINFO("Audio port %s has sound mode %d", selectedPort.c_str(), mode);
                 } else {
