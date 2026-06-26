@@ -26,7 +26,7 @@ find_package(${NAMESPACE}Plugins REQUIRED)
 
 set(TEST_SRC "")
 set(TEST_LIB ${NAMESPACE}Plugins::${NAMESPACE}Plugins)
-set(TEST_INC ../../helpers)
+set(TEST_INC)
 
 macro(add_plugin_test_ex plugin_opt plugin_test_sources_str plugin_includes_str plugin_libs_str)
     if(${plugin_opt})
@@ -51,7 +51,7 @@ endmacro()
 # PLUGIN_AUDIOOUTPUT
 set(AUDIOOUTPUT_INC
     ${CMAKE_SOURCE_DIR}/../entservices-audiooutput/plugin
-    ${CMAKE_SOURCE_DIR}/../entservices-audiooutput/helpers)
+    ${CMAKE_SOURCE_DIR}/../entservices-helpers/helpers)
 set(AUDIOOUTPUT_LIBS ${NAMESPACE}AudioOutput ${NAMESPACE}AudioOutputImplementation)
 add_plugin_test_ex(PLUGIN_AUDIOOUTPUT
     tests/test_AudioOutput.cpp

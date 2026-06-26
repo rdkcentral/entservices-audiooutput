@@ -125,7 +125,7 @@ jobs:
         with:
           repository: rdkcentral/entservices-testframework
           path: entservices-testframework
-          ref: 1.0.1
+          ref: 1.0.16
 
       - name: Checkout entservices-audiooutput
         if: ${{ inputs.caller_source == 'local' }}
@@ -346,6 +346,34 @@ jobs:
           &&
           cmake --install build/googletest
 
+      - name: Checkout entservices-helpers
+        uses: actions/checkout@v3
+        with:
+          repository: rdkcentral/entservices-helpers
+          path: entservices-helpers
+          ref: develop
+
+      - name: Build entservices-helpers
+        run: >
+          cmake -G Ninja
+          -S "$GITHUB_WORKSPACE/entservices-helpers"
+          -B build/entservices-helpers
+          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DUSE_THUNDER_R4=ON
+          -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
+          -DPLUGIN_HELPERS=ON
+          -DCMAKE_CXX_FLAGS="
+          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers
+          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
+          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/mocks
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tr181api.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h"
+          &&
+          cmake --build build/entservices-helpers
+          &&
+          cmake --install build/entservices-helpers
+
       - name: Build mocks
         run: >
           cmake
@@ -373,7 +401,7 @@ jobs:
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/ccec/drivers
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/network
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests
-          -I $GITHUB_WORKSPACE/entservices-audiooutput/helpers
+          -I $GITHUB_WORKSPACE/entservices-helpers/helpers
           -I $GITHUB_WORKSPACE/install/usr/include
           -I ./usr/include/libdrm
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/devicesettings.h
@@ -514,7 +542,7 @@ jobs:
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/ccec/drivers
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/network
-          -I $GITHUB_WORKSPACE/entservices-audiooutput/helpers
+          -I $GITHUB_WORKSPACE/entservices-helpers/helpers
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests
           -I $GITHUB_WORKSPACE/install/usr/include
           -I ./usr/include/libdrm

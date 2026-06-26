@@ -300,11 +300,6 @@ namespace Plugin {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Private: AtmosMetadata
-    // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
-    // -------------------------------------------------------------------------
-
     uint32_t AudioOutputImplementation::AtmosMetadata(bool& supported) const
     {
         dsATMOSCapability_t atmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
@@ -345,10 +340,6 @@ namespace Plugin {
         return (Core::ERROR_NONE);
     }
 
-    // -------------------------------------------------------------------------
-    // Private: SoundMode
-    // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
-    // -------------------------------------------------------------------------
 
     uint32_t AudioOutputImplementation::SoundMode(Exchange::Dolby::IOutput::SoundModes& mode) const
     {
@@ -409,6 +400,7 @@ namespace Plugin {
         } catch (const device::Exception& err) {
             TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
         }
+
         return Core::ERROR_NONE;
     }
     
