@@ -169,7 +169,7 @@ namespace Plugin {
     // IAudioOutput::Register / Unregister
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::Register(Exchange::IAudioOutput::INotification* notification)
+    Core::hresult AudioOutputImplementation::Register(Exchange::IAudioOutput::INotification* notification)
     {
         ASSERT(nullptr != notification);
 
@@ -183,9 +183,11 @@ namespace Plugin {
         }
 
         _adminLock.Unlock();
+
+        return Core::ERROR_NONE;
     }
 
-    void AudioOutputImplementation::Unregister(const Exchange::IAudioOutput::INotification* notification)
+    Core::hresult AudioOutputImplementation::Unregister(const Exchange::IAudioOutput::INotification* notification)
     {
         ASSERT(nullptr != notification);
 
@@ -200,6 +202,8 @@ namespace Plugin {
         }
 
         _adminLock.Unlock();
+
+        return Core::ERROR_NONE;
     }
 
     // -------------------------------------------------------------------------

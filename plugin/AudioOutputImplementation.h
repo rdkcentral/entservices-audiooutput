@@ -50,8 +50,8 @@ namespace Plugin {
 
         // IAudioOutput
         Core::hresult DolbyAtmosExperience(bool& enabled /* @out */) const override;
-        void Register(Exchange::IAudioOutput::INotification* notification) override;
-        void Unregister(const Exchange::IAudioOutput::INotification* notification) override;
+        Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
+        Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
 
         // Dolby::IOutput::INotification — receives audioModeChanged from PlayerInfo
         void AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled) override;
