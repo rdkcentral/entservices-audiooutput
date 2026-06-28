@@ -64,7 +64,6 @@ namespace Plugin {
         // HAL query helpers — logic copied from entservices-playerinfo PlatformImplementation.cpp
         uint32_t AtmosMetadata(bool& supported) const;
         uint32_t SoundMode(Exchange::Dolby::IOutput::SoundModes& mode) const;
-        static Exchange::Dolby::IOutput::SoundModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
 
         bool EvaluateCurrentAtmosExperience() const;
 

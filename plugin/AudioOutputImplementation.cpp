@@ -22,9 +22,9 @@
 #include <core/core.h>
 #include "UtilsLogging.h"
 
-// DeviceSettings HAL headers (same as entservices-playerinfo)
 #include "host.hpp"
 #include "audioOutputPort.hpp"
+#include "audioOutputPortType.hpp"
 #include "audioStereoMode.hpp"
 #include "manager.hpp"
 #include "exception.hpp"
@@ -340,6 +340,23 @@ namespace Plugin {
         return (Core::ERROR_NONE);
     }
 
+    // -------------------------------------------------------------------------
+    // DsAudioModeToSoundMode
+    // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
+    // -------------------------------------------------------------------------
+
+    static Exchange::Dolby::IOutput::SoundModes DsAudioModeToSoundMode(
+        const device::AudioStereoMode& smode)
+    {
+        if (smode == device::AudioStereoMode::kMono)     return Exchange::Dolby::IOutput::MONO;
+        if (smode == device::AudioStereoMode::kStereo)   return Exchange::Dolby::IOutput::STEREO;
+        if (smode == device::AudioStereoMode::kSurround) return Exchange::Dolby::IOutput::SURROUND;
+        if (smode == device::AudioStereoMode::kPassThru) return Exchange::Dolby::IOutput::PASSTHRU;
+        if (smode == device::AudioStereoMode::kDD)       return Exchange::Dolby::IOutput::DOLBYDIGITAL;
+        if (smode == device::AudioStereoMode::kDDPlus)   return Exchange::Dolby::IOutput::DOLBYDIGITALPLUS;
+        LOGWARN("Unknown AudioStereoMode encountered, returning UNKNOWN");
+        return Exchange::Dolby::IOutput::UNKNOWN;
+    }
 
     uint32_t AudioOutputImplementation::SoundMode(Exchange::Dolby::IOutput::SoundModes& mode) const
     {
@@ -402,25 +419,6 @@ namespace Plugin {
         }
 
         return Core::ERROR_NONE;
-    }
-    
-    // -------------------------------------------------------------------------
-    // Private static: DsAudioModeToSoundMode
-    // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
-    // -------------------------------------------------------------------------
-
-    /* static */
-    Exchange::Dolby::IOutput::SoundModes AudioOutputImplementation::DsAudioModeToSoundMode(
-        const device::AudioStereoMode& smode)
-    {
-        if (smode == device::AudioStereoMode::kMono)     return Exchange::Dolby::IOutput::MONO;
-        if (smode == device::AudioStereoMode::kStereo)   return Exchange::Dolby::IOutput::STEREO;
-        if (smode == device::AudioStereoMode::kSurround) return Exchange::Dolby::IOutput::SURROUND;
-        if (smode == device::AudioStereoMode::kPassThru) return Exchange::Dolby::IOutput::PASSTHRU;
-        if (smode == device::AudioStereoMode::kDD)       return Exchange::Dolby::IOutput::DOLBYDIGITAL;
-        if (smode == device::AudioStereoMode::kDDPlus)   return Exchange::Dolby::IOutput::DOLBYDIGITALPLUS;
-        LOGWARN("Unknown AudioStereoMode encountered, returning UNKNOWN");
-        return Exchange::Dolby::IOutput::UNKNOWN;
     }
 
 } // namespace Plugin
