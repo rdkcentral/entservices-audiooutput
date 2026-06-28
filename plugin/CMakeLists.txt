@@ -78,6 +78,7 @@ target_link_libraries(${PLUGIN_IMPLEMENTATION}
         ${NAMESPACE}::${NAMESPACE}Helpers)
 
 if(DS_FOUND)
+    target_compile_definitions(${PLUGIN_IMPLEMENTATION} PRIVATE USE_DEVICESETTINGS)
     target_link_libraries(${PLUGIN_IMPLEMENTATION} PRIVATE ${DS_LIBRARIES})
     target_include_directories(${PLUGIN_IMPLEMENTATION} PRIVATE ${DS_INCLUDE_DIRS})
 endif()
