@@ -23,6 +23,7 @@
 #include <interfaces/Ids.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IDolby.h>
+#include <interfaces/IConfiguration.h>
 
 #include <com/com.h>
 #include <core/core.h>
@@ -33,7 +34,8 @@ namespace WPEFramework {
 namespace Plugin {
 
     class AudioOutputImplementation
-        : public Exchange::IAudioOutput
+        : public Exchange::IConfiguration
+        , public Exchange::IAudioOutput
         , public Exchange::Dolby::IOutput::INotification {
 
     public:
@@ -44,6 +46,7 @@ namespace Plugin {
         ~AudioOutputImplementation() override;
 
         BEGIN_INTERFACE_MAP(AudioOutputImplementation)
+        INTERFACE_ENTRY(Exchange::IConfiguration)
         INTERFACE_ENTRY(Exchange::IAudioOutput)
         INTERFACE_ENTRY(Exchange::Dolby::IOutput::INotification)
         END_INTERFACE_MAP
@@ -56,9 +59,8 @@ namespace Plugin {
         // Dolby::IOutput::INotification — receives audioModeChanged from PlayerInfo
         void AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled) override;
 
-        // Initialize / Deinitialize (called by SERVICE_REGISTRATION lifecycle)
-        uint32_t Initialize(PluginHost::IShell* service);
-        uint32_t Deinitialize(PluginHost::IShell* service);
+        // Exchange::IConfiguration
+        uint32_t Configure(PluginHost::IShell* service) override;
 
     private:
         // HAL query helpers — logic copied from entservices-playerinfo PlatformImplementation.cpp

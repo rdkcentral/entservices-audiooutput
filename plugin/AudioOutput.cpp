@@ -73,7 +73,18 @@ namespace WPEFramework {
             _audioOutput = _service->Root<Exchange::IAudioOutput>(_connectionId, 5000, _T("AudioOutputImplementation"));
 
             if (nullptr != _audioOutput) {
-                Exchange::JAudioOutput::Register(*this, _audioOutput);
+                _configure = _audioOutput->QueryInterface<Exchange::IConfiguration>();
+                if (_configure != nullptr) {
+                    uint32_t result = _configure->Configure(service);
+                    if (result != Core::ERROR_NONE) {
+                        message = _T("AudioOutput could not be configured");
+                    }
+                } else {
+                    message = _T("AudioOutput implementation did not provide a configuration interface");
+                }
+                if (message.empty()) {
+                    Exchange::JAudioOutput::Register(*this, _audioOutput);
+                }
             } else {
                 SYSLOG(Logging::Startup, (_T("AudioOutput::Initialize: Failed to initialise AudioOutput plugin")));
                 message = _T("AudioOutput plugin could not be initialised");
@@ -90,6 +101,11 @@ namespace WPEFramework {
 
             if (nullptr != _audioOutput) {
                 Exchange::JAudioOutput::Unregister(*this);
+
+                if (_configure != nullptr) {
+                    _configure->Release();
+                    _configure = nullptr;
+                }
 
                 RPC::IRemoteConnection* connection = service->RemoteConnection(_connectionId);
                 VARIABLE_IS_NOT_USED uint32_t result = _audioOutput->Release();

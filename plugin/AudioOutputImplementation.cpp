@@ -46,8 +46,8 @@ namespace Plugin {
         try {
             device::Manager::Initialize();
             LOGINFO("device::Manager::Initialize success");
-        } catch (const std::exception& e) {
-            LOGERR("device::Manager::Initialize failed, Exception: {%s}", e.what());
+        } catch (const device::Exception& err) {
+            LOGWARN("device::Manager::Initialize failed (may already be initialized): {%s}", err.what());
         }
     }
 
@@ -55,19 +55,36 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation Destructor");
 
+        if (_playerInfo != nullptr) {
+            _playerInfo->Unregister(this);
+            _playerInfo->Release();
+            _playerInfo = nullptr;
+        }
+
+        if (_displaySettingsClient != nullptr) {
+            _displaySettingsClient->Unsubscribe(1000, _T("AtmosCapabilityChanged"));
+            delete _displaySettingsClient;
+            _displaySettingsClient = nullptr;
+        }
+
+        if (_service != nullptr) {
+            _service->Release();
+            _service = nullptr;
+        }
+
         try {
             device::Manager::DeInitialize();
             LOGINFO("device::Manager::DeInitialize success");
-        } catch (const std::exception& e) {
-            LOGERR("device::Manager::DeInitialize failed, Exception: {%s}", e.what());
+        } catch (const device::Exception& err) {
+            LOGWARN("device::Manager::DeInitialize failed: {%s}", err.what());
         }
     }
 
     // -------------------------------------------------------------------------
-    // Initialize / Deinitialize
+    // Exchange::IConfiguration::Configure
     // -------------------------------------------------------------------------
 
-    uint32_t AudioOutputImplementation::Initialize(PluginHost::IShell* service)
+    uint32_t AudioOutputImplementation::Configure(PluginHost::IShell* service)
     {
         ASSERT(service != nullptr);
 
@@ -78,7 +95,7 @@ namespace Plugin {
         InitializeDisplaySettings();
         UpdateCache();
 
-        LOGINFO("AudioOutputImplementation::Initialize: initial dolbyAtmosExperience=%s",
+        LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
 
         return Core::ERROR_NONE;
@@ -127,30 +144,6 @@ namespace Plugin {
         _adminLock.Lock();
         _dolbyAtmosExperience = EvaluateCurrentAtmosExperience();
         _adminLock.Unlock();
-    }
-
-    uint32_t AudioOutputImplementation::Deinitialize(PluginHost::IShell* service)
-    {
-        ASSERT(_service == service);
-
-        if (_playerInfo != nullptr) {
-            _playerInfo->Unregister(this);
-            _playerInfo->Release();
-            _playerInfo = nullptr;
-        }
-
-        if (_displaySettingsClient != nullptr) {
-            _displaySettingsClient->Unsubscribe(1000, _T("AtmosCapabilityChanged"));
-            delete _displaySettingsClient;
-            _displaySettingsClient = nullptr;
-        }
-
-        if (_service != nullptr) {
-            _service->Release();
-            _service = nullptr;
-        }
-
-        return Core::ERROR_NONE;
     }
 
     // -------------------------------------------------------------------------

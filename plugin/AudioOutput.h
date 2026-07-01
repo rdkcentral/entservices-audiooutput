@@ -21,6 +21,7 @@
 
 #include "Module.h"
 #include <interfaces/IAudioOutput.h>
+#include <interfaces/IConfiguration.h>
 #include <interfaces/json/JAudioOutput.h>
 #include <interfaces/json/JsonData_AudioOutput.h>
 #include "UtilsLogging.h"
@@ -56,6 +57,7 @@ namespace Plugin {
         PluginHost::IShell* _service{};
         uint32_t _connectionId{};
         Exchange::IAudioOutput* _audioOutput{};
+        Exchange::IConfiguration* _configure{};
     };
 
 } // namespace Plugin
