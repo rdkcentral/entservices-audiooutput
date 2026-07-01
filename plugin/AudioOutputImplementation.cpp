@@ -103,7 +103,7 @@ namespace Plugin {
         if (nullptr == _displaySettingsClient) {
             LOGERR("JSONRPC: %s: initialization failed", DISPLAYSETTINGS_CALLSIGN_VER);
         } else {
-            _displaySettingsClient->Subscribe<JsonObject>(1000, _T("onAtmosCapabilityChanged"),
+            _displaySettingsClient->Subscribe<JsonObject>(1000, _T("AtmosCapabilityChanged"),
                 &AudioOutputImplementation::onAtmosCapabilityChanged, this);
         }
     }
@@ -140,7 +140,7 @@ namespace Plugin {
         }
 
         if (_displaySettingsClient != nullptr) {
-            _displaySettingsClient->Unsubscribe(1000, _T("onAtmosCapabilityChanged"));
+            _displaySettingsClient->Unsubscribe(1000, _T("AtmosCapabilityChanged"));
             delete _displaySettingsClient;
             _displaySettingsClient = nullptr;
         }
