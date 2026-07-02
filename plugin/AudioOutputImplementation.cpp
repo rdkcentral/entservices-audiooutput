@@ -44,10 +44,11 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation Constructor");
 
         try {
+            
             device::Manager::Initialize();
             LOGINFO("device::Manager::Initialize success");
         } catch (const device::Exception& err) {
-            LOGWARN("device::Manager::Initialize failed (may already be initialized): {%s}", err.what());
+            LOGWARN("device::Manager::Initialize failed : {%s}", err.what());
         }
     }
 

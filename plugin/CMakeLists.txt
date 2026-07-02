@@ -20,7 +20,7 @@ set(MODULE_NAME ${NAMESPACE}${PLUGIN_NAME})
 set(PLUGIN_IMPLEMENTATION ${MODULE_NAME}Implementation)
 
 set(PLUGIN_AUDIOOUTPUT_AUTOSTART "false" CACHE STRING "Automatically start AudioOutput plugin")
-set(PLUGIN_AUDIOOUTPUT_MODE "LOCAL" CACHE STRING "AudioOutput execution mode (LOCAL=out-of-process, OFF=in-process)")
+set(PLUGIN_AUDIOOUTPUT_MODE "Off" CACHE STRING "AudioOutput execution mode (Off=in-process, LOCAL=out-of-process)")
 set(PLUGIN_AUDIOOUTPUT_STARTUPORDER "" CACHE STRING "Startup order for AudioOutput plugin")
 
 find_package(${NAMESPACE}Plugins REQUIRED)
