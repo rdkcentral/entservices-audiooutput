@@ -130,6 +130,7 @@ namespace Plugin {
     {
         bool cap = false;
         if (AtmosMetadata(cap) == Core::ERROR_NONE) {
+            LOGINFO("update cache: atmos metadata is %s", cap ? "true" : "false");
             _adminLock.Lock();
             _atmosMetaData = cap;
             _adminLock.Unlock();
@@ -138,6 +139,7 @@ namespace Plugin {
         Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
         if (SoundMode(mode) == Core::ERROR_NONE) {
             _adminLock.Lock();
+             LOGINFO("update cache: sound mode is %d", static_cast<int>(mode));
             _soundMode = mode;
             _adminLock.Unlock();
         }
@@ -265,6 +267,8 @@ namespace Plugin {
         _adminLock.Lock();
         std::list<Exchange::IAudioOutput::INotification*> index(_observers);
 
+        LOGINFO("AudioOutputImplementation: SendNotify: notifying %zu observers of dolbyAtmosExperience=%s",
+                index.size(), dolbyAtmosExperience ? "true" : "false");
         for (auto* itr : index) {
             itr->OnDolbyAtmosExperienceChanged(dolbyAtmosExperience);
         }
@@ -287,7 +291,7 @@ namespace Plugin {
         switch (_soundMode) {
         case Exchange::Dolby::IOutput::PASSTHRU:
         case Exchange::Dolby::IOutput::DOLBYDIGITALPLUS:
-        case Exchange::Dolby::IOutput::SOUNDMODE_AUTO:
+        case Exchange::Dolby::IOutput::SURROUND;
             return true;
         default:
             return false;
@@ -329,7 +333,7 @@ namespace Plugin {
         {
             TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
         }
-
+        LOGINFO("getSinkAtmosCapability: atmosCapability=%d", atmosCapability);
         if(atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA) supported = true;
         return (Core::ERROR_NONE);
     }
