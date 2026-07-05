@@ -285,7 +285,7 @@ namespace Plugin {
     bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
     {
         if (!_atmosMetaData) {
-            return false;
+            return true;
         }
 
         switch (_soundMode) {
