@@ -44,9 +44,9 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation Constructor");
 
         try {
-            
             device::Manager::Initialize();
             LOGINFO("device::Manager::Initialize success");
+            registerDsEventHandlers();
         } catch (const device::Exception& err) {
             LOGWARN("device::Manager::Initialize failed : {%s}", err.what());
         }
@@ -57,15 +57,9 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation Destructor");
 
         if (_playerInfo != nullptr) {
-            _playerInfo->Unregister(this);
+            _playerInfo->Unregister(&_playerInfoNotification);
             _playerInfo->Release();
             _playerInfo = nullptr;
-        }
-
-        if (_displaySettingsClient != nullptr) {
-            _displaySettingsClient->Unsubscribe(1000, _T("AtmosCapabilityChanged"));
-            delete _displaySettingsClient;
-            _displaySettingsClient = nullptr;
         }
 
         if (_service != nullptr) {
@@ -74,6 +68,9 @@ namespace Plugin {
         }
 
         try {
+            if (_registeredDsEventHandlers) {
+                unregisterDsEventHandlers();
+            }
             device::Manager::DeInitialize();
             LOGINFO("device::Manager::DeInitialize success");
         } catch (const device::Exception& err) {
@@ -93,7 +90,6 @@ namespace Plugin {
         _service->AddRef();
 
         InitializePlayerInfo();
-        InitializeDisplaySettings();
         UpdateCache();
 
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
@@ -108,21 +104,25 @@ namespace Plugin {
 
         _playerInfo = _service->QueryInterfaceByCallsign<Exchange::Dolby::IOutput>(PLAYERINFO_CALLSIGN);
         if (_playerInfo != nullptr) {
-            _playerInfo->Register(this);
+            _playerInfo->Register(&_playerInfoNotification);
         }
     }
 
-    void AudioOutputImplementation::InitializeDisplaySettings()
+    void AudioOutputImplementation::registerDsEventHandlers()
     {
-        LOGINFO("Connect the JSON-RPC socket for DisplaySettings");
+        if (!_registeredDsEventHandlers) {
+            _registeredDsEventHandlers = true;
+            device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]");
+            LOGINFO("Registered for IAudioOutputPortEvents");
+        }
+    }
 
-        _displaySettingsClient = new WPEFramework::JSONRPC::LinkType<Core::JSON::IElement>(
-            _T(DISPLAYSETTINGS_CALLSIGN_VER), _T("AudioOutput"), false, string{});
-        if (nullptr == _displaySettingsClient) {
-            LOGERR("JSONRPC: %s: initialization failed", DISPLAYSETTINGS_CALLSIGN_VER);
-        } else {
-            _displaySettingsClient->Subscribe<JsonObject>(1000, _T("AtmosCapabilityChanged"),
-                &AudioOutputImplementation::onAtmosCapabilityChanged, this);
+    void AudioOutputImplementation::unregisterDsEventHandlers()
+    {
+        if (_registeredDsEventHandlers) {
+            _registeredDsEventHandlers = false;
+            device::Host::getInstance().UnRegister(&_dsAudioPortNotification);
+            LOGINFO("Unregistered from IAudioOutputPortEvents");
         }
     }
 
@@ -207,7 +207,7 @@ namespace Plugin {
     // Received when PlayerInfo detects an audio mode change
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enable)
+    void AudioOutputImplementation::onAudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enable)
     {
         LOGINFO("AudioOutputImplementation::AudioModeChanged: mode=%d", static_cast<int>(mode));
 
@@ -226,23 +226,21 @@ namespace Plugin {
     }
 
     // -------------------------------------------------------------------------
-    // onAtmosCapabilityChangedHandler
-    // JSON-RPC event handler for DisplaySettings onAtmosCapabilityChanged
+    // onAtmosCapabilitiesChanged
+    // DS HAL callback for OnDolbyAtmosCapabilitiesChanged
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::onAtmosCapabilityChanged(const JsonObject& parameters)
+    void AudioOutputImplementation::onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status)
     {
-        if (!parameters.HasLabel("currentAtmosCapability")) {
-            LOGERR("AudioOutputImplementation: onAtmosCapabilityChanged: missing currentAtmosCapability");
+        LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: atmosCapability=%d, status=%d",
+                atmosCapability, static_cast<int>(status));
+
+        if (!status) {
+            LOGINFO("AudioOutputImplementation: ignoring, status=false");
             return;
         }
 
-        const string& capStr = parameters["currentAtmosCapability"].String();
-        if (capStr != "ATMOS_SUPPORTED" && capStr != "ATMOS_NOT_SUPPORTED") {
-            LOGINFO("AudioOutputImplementation: unknown currentAtmosCapability value '%s', ignoring", capStr.c_str());
-            return;
-        }
-        const bool cap = (capStr == "ATMOS_SUPPORTED");
+        const bool cap = (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
 
         _adminLock.Lock();
         _atmosMetaData = cap;
@@ -291,7 +289,7 @@ namespace Plugin {
         switch (_soundMode) {
         case Exchange::Dolby::IOutput::PASSTHRU:
         case Exchange::Dolby::IOutput::DOLBYDIGITALPLUS:
-	case Exchange::Dolby::IOutput::SURROUND:
+	    case Exchange::Dolby::IOutput::SURROUND:
             return true;
         default:
             return false;

@@ -27,16 +27,17 @@
 
 #include <com/com.h>
 #include <core/core.h>
-#include <plugins/JSONRPC.h>
 #include <list>
+
+#include "host.hpp"
+#include "dsAudio.h"
 
 namespace WPEFramework {
 namespace Plugin {
 
     class AudioOutputImplementation
         : public Exchange::IConfiguration
-        , public Exchange::IAudioOutput
-        , public Exchange::Dolby::IOutput::INotification {
+        , public Exchange::IAudioOutput {
 
     public:
         AudioOutputImplementation(const AudioOutputImplementation&) = delete;
@@ -48,7 +49,6 @@ namespace Plugin {
         BEGIN_INTERFACE_MAP(AudioOutputImplementation)
         INTERFACE_ENTRY(Exchange::IConfiguration)
         INTERFACE_ENTRY(Exchange::IAudioOutput)
-        INTERFACE_ENTRY(Exchange::Dolby::IOutput::INotification)
         END_INTERFACE_MAP
 
         // IAudioOutput
@@ -56,11 +56,67 @@ namespace Plugin {
         Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
 
-        // Dolby::IOutput::INotification — receives audioModeChanged from PlayerInfo
-        void AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled) override;
-
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
+
+    private:
+        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
+        private:
+            DsAudioPortNotification(const DsAudioPortNotification&) = delete;
+            DsAudioPortNotification& operator=(const DsAudioPortNotification&) = delete;
+
+        public:
+            explicit DsAudioPortNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~DsAudioPortNotification() override = default;
+
+        public:
+            void OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status) override
+            {
+                _parent.onAtmosCapabilitiesChanged(atmosCapability, status);
+            }
+
+            // Stubs for other IAudioOutputPortEvents methods
+            void OnAudioOutHotPlug(dsAudioPortType_t, uint32_t, bool) override {}
+            void OnAudioFormatUpdate(dsAudioFormat_t) override {}
+            void OnAudioPortStateChanged(dsAudioPortState_t) override {}
+            void OnAssociatedAudioMixingChanged(bool) override {}
+            void OnAudioFaderControlChanged(int) override {}
+            void OnAudioPrimaryLanguageChanged(const std::string&) override {}
+            void OnAudioSecondaryLanguageChanged(const std::string&) override {}
+            void OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t) override {}
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
+
+        class PlayerInfoNotification : public Exchange::Dolby::IOutput::INotification {
+        private:
+            PlayerInfoNotification(const PlayerInfoNotification&) = delete;
+            PlayerInfoNotification& operator=(const PlayerInfoNotification&) = delete;
+
+        public:
+            explicit PlayerInfoNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~PlayerInfoNotification() override = default;
+
+        public:
+            void AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled) override
+            {
+                _parent.onAudioModeChanged(mode, enabled);
+            }
+
+            BEGIN_INTERFACE_MAP(PlayerInfoNotification)
+            INTERFACE_ENTRY(Exchange::Dolby::IOutput::INotification)
+            END_INTERFACE_MAP
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
 
     private:
         // HAL query helpers — logic copied from entservices-playerinfo PlatformImplementation.cpp
@@ -71,9 +127,11 @@ namespace Plugin {
 
         void SendNotify(bool dolbyAtmosExperience);
         void InitializePlayerInfo();
-        void InitializeDisplaySettings();
         void UpdateCache();
-        void onAtmosCapabilityChanged(const JsonObject& parameters);
+        void registerDsEventHandlers();
+        void unregisterDsEventHandlers();
+        void onAudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled);
+        void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
 
     private:
         mutable Core::CriticalSection _adminLock;
@@ -89,11 +147,13 @@ namespace Plugin {
         // Inter-plugin COM-RPC handles
         PluginHost::IShell* _service{};
         Exchange::Dolby::IOutput* _playerInfo{};   // org.rdk.PlayerInfo
-        WPEFramework::JSONRPC::LinkType<Core::JSON::IElement>* _displaySettingsClient{nullptr};  // org.rdk.DisplaySettings
+        Core::Sink<PlayerInfoNotification> _playerInfoNotification{*this};
 
-        static constexpr const char* PLAYERINFO_CALLSIGN      = "org.rdk.PlayerInfo";
-        static constexpr const char* DISPLAYSETTINGS_CALLSIGN = "org.rdk.DisplaySettings";
-        static constexpr const char* DISPLAYSETTINGS_CALLSIGN_VER = "org.rdk.DisplaySettings.1";
+        // DS HAL event listener
+        DsAudioPortNotification _dsAudioPortNotification{*this};
+        bool _registeredDsEventHandlers{false};
+
+        static constexpr const char* PLAYERINFO_CALLSIGN = "org.rdk.PlayerInfo";
     };
 
 } // namespace Plugin
