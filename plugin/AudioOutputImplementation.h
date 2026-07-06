@@ -86,33 +86,10 @@ namespace Plugin {
             void OnAudioFaderControlChanged(int) override {}
             void OnAudioPrimaryLanguageChanged(const std::string&) override {}
             void OnAudioSecondaryLanguageChanged(const std::string&) override {}
-            void OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t) override {}
-
-        private:
-            AudioOutputImplementation& _parent;
-        };
-
-        class PlayerInfoNotification : public Exchange::Dolby::IOutput::INotification {
-        private:
-            PlayerInfoNotification(const PlayerInfoNotification&) = delete;
-            PlayerInfoNotification& operator=(const PlayerInfoNotification&) = delete;
-
-        public:
-            explicit PlayerInfoNotification(AudioOutputImplementation& parent)
-                : _parent(parent)
+            void OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t smode) override
             {
+                _parent.onAudioModeChanged(smode);
             }
-            ~PlayerInfoNotification() override = default;
-
-        public:
-            void AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled) override
-            {
-                _parent.onAudioModeChanged(mode, enabled);
-            }
-
-            BEGIN_INTERFACE_MAP(PlayerInfoNotification)
-            INTERFACE_ENTRY(Exchange::Dolby::IOutput::INotification)
-            END_INTERFACE_MAP
 
         private:
             AudioOutputImplementation& _parent;
@@ -126,11 +103,10 @@ namespace Plugin {
         bool EvaluateCurrentAtmosExperience() const;
 
         void SendNotify(bool dolbyAtmosExperience);
-        void InitializePlayerInfo();
         void UpdateCache();
         void registerDsEventHandlers();
         void unregisterDsEventHandlers();
-        void onAudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled);
+        void onAudioModeChanged(dsAudioStereoMode_t smode);
         void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
 
     private:
@@ -144,16 +120,9 @@ namespace Plugin {
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
 
-        // Inter-plugin COM-RPC handles
-        PluginHost::IShell* _service{};
-        Exchange::Dolby::IOutput* _playerInfo{};   // org.rdk.PlayerInfo
-        Core::Sink<PlayerInfoNotification> _playerInfoNotification{*this};
-
         // DS HAL event listener
         DsAudioPortNotification _dsAudioPortNotification{*this};
         bool _registeredDsEventHandlers{false};
-
-        static constexpr const char* PLAYERINFO_CALLSIGN = "org.rdk.PlayerInfo";
     };
 
 } // namespace Plugin

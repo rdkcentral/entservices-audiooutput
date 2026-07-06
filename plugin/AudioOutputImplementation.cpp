@@ -33,6 +33,8 @@
 namespace WPEFramework {
 namespace Plugin {
 
+    static Exchange::Dolby::IOutput::SoundModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
+
     SERVICE_REGISTRATION(AudioOutputImplementation, 1, 0);
 
     // -------------------------------------------------------------------------
@@ -56,17 +58,6 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation Destructor");
 
-        if (_playerInfo != nullptr) {
-            _playerInfo->Unregister(&_playerInfoNotification);
-            _playerInfo->Release();
-            _playerInfo = nullptr;
-        }
-
-        if (_service != nullptr) {
-            _service->Release();
-            _service = nullptr;
-        }
-
         try {
             if (_registeredDsEventHandlers) {
                 unregisterDsEventHandlers();
@@ -86,27 +77,12 @@ namespace Plugin {
     {
         ASSERT(service != nullptr);
 
-        _service = service;
-        _service->AddRef();
-
-        InitializePlayerInfo();
         UpdateCache();
 
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
 
         return Core::ERROR_NONE;
-    }
-
-    void AudioOutputImplementation::InitializePlayerInfo()
-    {
-        LOGINFO("Connect the COM-RPC socket for PlayerInfo");
-
-        _playerInfo = _service->QueryInterfaceByCallsign<Exchange::Dolby::IOutput>(PLAYERINFO_CALLSIGN);
-        if (_playerInfo != nullptr) {
-            LOGINFO("AudioOutputImplementation::registering for PlayerInfo notifications");
-            _playerInfo->Register(&_playerInfoNotification);
-        }
     }
 
     void AudioOutputImplementation::registerDsEventHandlers()
@@ -140,7 +116,7 @@ namespace Plugin {
         Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
         if (SoundMode(mode) == Core::ERROR_NONE) {
             _adminLock.Lock();
-             LOGINFO("update cache: sound mode is %d", static_cast<int>(mode));
+            LOGINFO("update cache: sound mode is %d", static_cast<int>(mode));
             _soundMode = mode;
             _adminLock.Unlock();
         }
@@ -204,13 +180,14 @@ namespace Plugin {
     }
 
     // -------------------------------------------------------------------------
-    // Dolby::IOutput::INotification::AudioModeChanged
-    // Received when PlayerInfo detects an audio mode change
+    // onAudioModeChanged
+    // DS HAL callback for OnAudioModeEvent (IAudioOutputPortEvents)
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::onAudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enable)
+    void AudioOutputImplementation::onAudioModeChanged(dsAudioStereoMode_t smode)
     {
-        LOGINFO("AudioOutputImplementation::AudioModeChanged: mode=%d", static_cast<int>(mode));
+        const Exchange::Dolby::IOutput::SoundModes mode = DsAudioModeToSoundMode(smode);
+        LOGINFO("AudioOutputImplementation::onAudioModeChanged: mode=%d", static_cast<int>(mode));
 
         _adminLock.Lock();
         _soundMode = mode;
