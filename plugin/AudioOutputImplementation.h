@@ -107,8 +107,6 @@ namespace Plugin {
         public:
             void AudioModeChanged(const Exchange::Dolby::IOutput::SoundModes mode, const bool enabled) override
             {
-                LOGINFO("AudioOutputImplementation::AudioModeChanged: mode=%d, enabled=%s",
-                        static_cast<int>(mode), enabled ? "true" : "false");
                 _parent.onAudioModeChanged(mode, enabled);
             }
 
