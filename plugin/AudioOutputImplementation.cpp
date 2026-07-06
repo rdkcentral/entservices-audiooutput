@@ -104,6 +104,7 @@ namespace Plugin {
 
         _playerInfo = _service->QueryInterfaceByCallsign<Exchange::Dolby::IOutput>(PLAYERINFO_CALLSIGN);
         if (_playerInfo != nullptr) {
+            LOGINFO("AudioOutputImplementation::registering for PlayerInfo notifications");
             _playerInfo->Register(&_playerInfoNotification);
         }
     }
@@ -283,7 +284,7 @@ namespace Plugin {
     bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
     {
         if (!_atmosMetaData) {
-            return true;
+            return false;
         }
 
         switch (_soundMode) {

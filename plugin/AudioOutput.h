@@ -32,6 +32,55 @@ namespace Plugin {
 
     class AudioOutput : public PluginHost::IPlugin, public PluginHost::JSONRPC {
 
+    private:
+        class Notification : public Exchange::IAudioOutput::INotification {
+        public:
+            Notification() = delete;
+            Notification(const Notification&) = delete;
+            Notification& operator=(const Notification&) = delete;
+
+            explicit Notification(AudioOutput* parent)
+                : _parent(*parent)
+                , _client(nullptr)
+            {
+                ASSERT(parent != nullptr);
+            }
+            ~Notification() override = default;
+
+            void Initialize(Exchange::IAudioOutput* client)
+            {
+                ASSERT(client != nullptr);
+                _client = client;
+                _client->AddRef();
+                _client->Register(this);
+            }
+
+            void Deinitialize()
+            {
+                ASSERT(_client != nullptr);
+                if (_client != nullptr) {
+                    _client->Unregister(this);
+                    _client->Release();
+                    _client = nullptr;
+                }
+            }
+
+            void OnDolbyAtmosExperienceChanged(const bool dolbyAtmosExperience) override
+            {
+                LOGINFO("AudioOutput::Notification::OnDolbyAtmosExperienceChanged: dolbyAtmosExperience=%s",
+                        dolbyAtmosExperience ? "true" : "false");
+                Exchange::JAudioOutput::Event::OnDolbyAtmosExperienceChanged(_parent, dolbyAtmosExperience);
+            }
+
+            BEGIN_INTERFACE_MAP(Notification)
+            INTERFACE_ENTRY(Exchange::IAudioOutput::INotification)
+            END_INTERFACE_MAP
+
+        private:
+            AudioOutput& _parent;
+            Exchange::IAudioOutput* _client;
+        };
+
     public:
         AudioOutput(const AudioOutput&) = delete;
         AudioOutput& operator=(const AudioOutput&) = delete;
@@ -58,6 +107,7 @@ namespace Plugin {
         uint32_t _connectionId{};
         Exchange::IAudioOutput* _audioOutput{};
         Exchange::IConfiguration* _configure{};
+        Core::Sink<Notification> _notification;
     };
 
 } // namespace Plugin

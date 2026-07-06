@@ -47,6 +47,7 @@ namespace WPEFramework {
             : _service(nullptr)
             , _connectionId(0)
             , _audioOutput(nullptr)
+            , _notification(this)
         {
             SYSLOG(Logging::Startup, (_T("AudioOutput Constructor")));
         }
@@ -82,9 +83,9 @@ namespace WPEFramework {
                 } else {
                     message = _T("AudioOutput implementation did not provide a configuration interface");
                 }
-                if (message.empty()) {
-                    Exchange::JAudioOutput::Register(*this, _audioOutput);
-                }
+                Exchange::JAudioOutput::Register(*this, _audioOutput);
+               _notification.Initialize(_audioOutput);
+               
             } else {
                 SYSLOG(Logging::Startup, (_T("AudioOutput::Initialize: Failed to initialise AudioOutput plugin")));
                 message = _T("AudioOutput plugin could not be initialised");
@@ -100,6 +101,7 @@ namespace WPEFramework {
             SYSLOG(Logging::Shutdown, (string(_T("AudioOutput::Deinitialize"))));
 
             if (nullptr != _audioOutput) {
+                _notification.Deinitialize();
                 Exchange::JAudioOutput::Unregister(*this);
 
                 if (_configure != nullptr) {
