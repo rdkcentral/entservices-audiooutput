@@ -291,7 +291,7 @@ namespace Plugin {
         switch (_soundMode) {
         case Exchange::Dolby::IOutput::PASSTHRU:
         case Exchange::Dolby::IOutput::DOLBYDIGITALPLUS:
-        case Exchange::Dolby::IOutput::SURROUND;
+	case Exchange::Dolby::IOutput::SURROUND:
             return true;
         default:
             return false;
