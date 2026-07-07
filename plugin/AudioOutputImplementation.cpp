@@ -242,14 +242,14 @@ namespace Plugin {
 
     bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
     {
-        if (!_atmosMetaData) {
-            return true;
-        }
+        //if (!_atmosMetaData) {
+          //  return true;
+        //}
 
         switch (_soundMode) {
         case Exchange::Dolby::IOutput::PASSTHRU:
         case Exchange::Dolby::IOutput::DOLBYDIGITALPLUS:
-	    case Exchange::Dolby::IOutput::SURROUND:
+	    case Exchange::Dolby::IOutput::SOUNDMODE_AUTO:
             return true;
         default:
             return false;
@@ -359,8 +359,7 @@ namespace Plugin {
                     device::AudioStereoMode soundmode = aPort.getStereoMode();
                     mode = DsAudioModeToSoundMode(soundmode);
                     // Auto mode for HDMI ARC and SPDIF
-                    if ((aPort.getType().getId() == device::AudioOutputPortType::kARC || aPort.getType().getId() == device::AudioOutputPortType::kSPDIF)
-                            && aPort.getStereoAuto()) {
+                    if (aPort.getStereoAuto()) {
                         mode = Exchange::Dolby::IOutput::SOUNDMODE_AUTO;
                     }
                     LOGINFO("Audio port %s has sound mode %d", selectedPort.c_str(), mode);
