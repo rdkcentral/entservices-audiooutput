@@ -75,18 +75,8 @@ namespace Plugin {
     uint32_t AudioOutputImplementation::Configure(PluginHost::IShell* service)
     {
         ASSERT(service != nullptr);
-        bool cap = false;
 
-        if (AtmosMetadata(cap) != Core::ERROR_NONE) {
-            LOGERR("Failed to get atmos metadata capability from device::Host");
-        }
-
-        Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
-        if (SoundMode(mode) != Core::ERROR_NONE) {
-            LOGERR("Failed to get sound mode from device::Host");
-        }
-
-        UpdateCache(cap, mode);
+        UpdateCache();
 
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
@@ -112,17 +102,27 @@ namespace Plugin {
         }
     }
 
-    void AudioOutputImplementation::UpdateCache(bool atmosMetadata, Exchange::Dolby::IOutput::SoundModes mode)
+    void AudioOutputImplementation::UpdateCache()
     {
-       _adminLock.Lock();
-       _atmosMetaData = atmosMetadata;
-       _soundMode = mode;
-       bool newValue = EvaluateCurrentAtmosExperience();
-       bool isAtmosExpChanged = (newValue != _dolbyAtmosExperience);
-       _dolbyAtmosExperience = newValue;
-       _adminLock.Unlock();
-       
-       if (isAtmosExpChanged) {
+        bool cap = false;
+        if (AtmosMetadata(cap) != Core::ERROR_NONE) {
+            LOGERR("UpdateCache: failed to get atmos metadata from HAL");
+        }
+
+        Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
+        if (SoundMode(mode) != Core::ERROR_NONE) {
+            LOGERR("UpdateCache: failed to get sound mode from HAL");
+        }
+
+        _adminLock.Lock();
+        _atmosMetaData = cap;
+        _soundMode = mode;
+        bool newValue = EvaluateCurrentAtmosExperience();
+        bool isAtmosExpChanged = (newValue != _dolbyAtmosExperience);
+        _dolbyAtmosExperience = newValue;
+        _adminLock.Unlock();
+
+        if (isAtmosExpChanged) {
             LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
             SendNotify(newValue);
@@ -189,11 +189,8 @@ namespace Plugin {
 
     void AudioOutputImplementation::onAudioModeChanged(dsAudioStereoMode_t smode)
     {
-        const Exchange::Dolby::IOutput::SoundModes mode = DsAudioModeToSoundMode(smode);
-        LOGINFO("AudioOutputImplementation::onAudioModeChanged: mode=%d", static_cast<int>(mode));
-
-        UpdateCache(_atmosMetaData, mode);
-        
+        LOGINFO("AudioOutputImplementation::onAudioModeChanged: smode=%d", static_cast<int>(smode));
+        UpdateCache();
     }
 
     // -------------------------------------------------------------------------
@@ -205,15 +202,7 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: atmosCapability=%d, status=%d",
                 atmosCapability, static_cast<int>(status));
-
-        if (!status) {
-            LOGINFO("AudioOutputImplementation: ignoring, status=false");
-            return;
-        }
-
-        const bool cap = (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
-
-        UpdateCache(cap, _soundMode);
+        UpdateCache();
     }
 
     // -------------------------------------------------------------------------
