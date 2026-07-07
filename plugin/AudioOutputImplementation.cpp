@@ -34,7 +34,6 @@ namespace WPEFramework {
 namespace Plugin {
 
     static Exchange::Dolby::IOutput::SoundModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
-
     SERVICE_REGISTRATION(AudioOutputImplementation, 1, 0);
 
     // -------------------------------------------------------------------------
@@ -76,8 +75,18 @@ namespace Plugin {
     uint32_t AudioOutputImplementation::Configure(PluginHost::IShell* service)
     {
         ASSERT(service != nullptr);
+        bool cap = false;
 
-        UpdateCache();
+        if (AtmosMetadata(cap) != Core::ERROR_NONE) {
+            LOGERR("Failed to get atmos metadata capability from device::Host");
+        }
+
+        Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
+        if (SoundMode(mode) != Core::ERROR_NONE) {
+            LOGERR("Failed to get sound mode from device::Host");
+        }
+
+        UpdateCache(cap, mode);
 
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
@@ -103,27 +112,21 @@ namespace Plugin {
         }
     }
 
-    void AudioOutputImplementation::UpdateCache()
+    void AudioOutputImplementation::UpdateCache(bool atmosMetadata, Exchange::Dolby::IOutput::SoundModes mode)
     {
-        bool cap = false;
-        if (AtmosMetadata(cap) == Core::ERROR_NONE) {
-            LOGINFO("update cache: atmos metadata is %s", cap ? "true" : "false");
-            _adminLock.Lock();
-            _atmosMetaData = cap;
-            _adminLock.Unlock();
+       _adminLock.Lock();
+       _atmosMetaData = atmosMetadata;
+       _soundMode = mode;
+       bool newValue = EvaluateCurrentAtmosExperience();
+       bool isAtmosExpChanged = (newValue != _dolbyAtmosExperience);
+       _dolbyAtmosExperience = newValue;
+       _adminLock.Unlock();
+       
+       if (isAtmosExpChanged) {
+            LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
+                    newValue ? "true" : "false");
+            SendNotify(newValue);
         }
-
-        Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
-        if (SoundMode(mode) == Core::ERROR_NONE) {
-            _adminLock.Lock();
-            LOGINFO("update cache: sound mode is %d", static_cast<int>(mode));
-            _soundMode = mode;
-            _adminLock.Unlock();
-        }
-
-        _adminLock.Lock();
-        _dolbyAtmosExperience = EvaluateCurrentAtmosExperience();
-        _adminLock.Unlock();
     }
 
     // -------------------------------------------------------------------------
@@ -189,18 +192,8 @@ namespace Plugin {
         const Exchange::Dolby::IOutput::SoundModes mode = DsAudioModeToSoundMode(smode);
         LOGINFO("AudioOutputImplementation::onAudioModeChanged: mode=%d", static_cast<int>(mode));
 
-        _adminLock.Lock();
-        _soundMode = mode;
-        bool newValue = EvaluateCurrentAtmosExperience();
-        bool changed = (newValue != _dolbyAtmosExperience);
-        _dolbyAtmosExperience = newValue;
-        _adminLock.Unlock();
-
-        if (changed) {
-            LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
-                    newValue ? "true" : "false");
-            SendNotify(newValue);
-        }
+        UpdateCache(_atmosMetaData, mode);
+        
     }
 
     // -------------------------------------------------------------------------
@@ -220,18 +213,7 @@ namespace Plugin {
 
         const bool cap = (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
 
-        _adminLock.Lock();
-        _atmosMetaData = cap;
-        bool newValue = EvaluateCurrentAtmosExperience();
-        bool changed = (newValue != _dolbyAtmosExperience);
-        _dolbyAtmosExperience = newValue;
-        _adminLock.Unlock();
-
-        if (changed) {
-            LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
-                    newValue ? "true" : "false");
-            SendNotify(newValue);
-        }
+        UpdateCache(cap, _soundMode);
     }
 
     // -------------------------------------------------------------------------
@@ -261,7 +243,7 @@ namespace Plugin {
     bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
     {
         if (!_atmosMetaData) {
-            return false;
+            return true;
         }
 
         switch (_soundMode) {

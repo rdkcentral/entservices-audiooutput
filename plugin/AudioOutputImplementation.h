@@ -103,7 +103,7 @@ namespace Plugin {
         bool EvaluateCurrentAtmosExperience() const;
 
         void SendNotify(bool dolbyAtmosExperience);
-        void UpdateCache();
+        void UpdateCache(bool cap, Exchange::Dolby::IOutput::SoundModes mode);
         void registerDsEventHandlers();
         void unregisterDsEventHandlers();
         void onAudioModeChanged(dsAudioStereoMode_t smode);
