@@ -12,7 +12,7 @@ A new Thunder plugin `AudioOutput` is introduced to expose the Dolby Atmos Exper
 
 The `AudioOutput` plugin is a WPEFramework (Thunder) service registered under the callsign `org.rdk.AudioOutput`. It is the canonical place for audio output related capabilities exposed to Firebolt clients.
 
-The initial capability is **Dolby Atmos Experience** determination. Rather than requiring clients to call two separate PlayerInfo APIs and combine the results themselves, `AudioOutput` exposes a single boolean method `dolbyAtmosExperience` that encapsulates the combination logic internally. The plugin maintains an internal cache of the two underlying values (`AtmosCapability` and `soundMode`) and recomputes the combined result whenever either value changes via COM-RPC events from `PlayerInfo` or `DisplaySettings`.
+The initial capability is **Dolby Atmos Experience** determination. Rather than requiring clients to call two separate PlayerInfo APIs and combine the results themselves, `AudioOutput` exposes a single boolean method `dolbyAtmosExperience` that encapsulates the combination logic internally. The plugin maintains an internal cache of the two underlying values (`AtmosCapability` and `soundMode`) and recomputes the combined result whenever either value changes via DS HAL event callbacks registered through `device::Host::IAudioOutputPortEvents`.
 
 ### Plugin Structure
 
@@ -51,7 +51,7 @@ Step 2: Check soundMode
                                         →  return true
 ```
 
-Both values are obtained from `Exchange::IPlayerInfo` via COM-RPC at initialisation, then kept in cache and refreshed on every relevant event.
+Both values are obtained by direct HAL queries via `device::Host` (DeviceSettings) at startup, then kept in cache and refreshed on every relevant DS HAL event.
 
 ### Cache and Event Flow
 
@@ -60,7 +60,7 @@ Both values are obtained from `Exchange::IPlayerInfo` via COM-RPC at initialisat
                 │  AudioOutputImplementation   │
                 │                              │
                 │  Cache:                      │
-                │    _atmosCapability          │
+                │    _atmosMetaData            │
                 │    _soundMode                │
                 │    _dolbyAtmosExperience     │
                 └──────────────┬───────────────┘
@@ -68,12 +68,12 @@ Both values are obtained from `Exchange::IPlayerInfo` via COM-RPC at initialisat
           ┌────────────────────┼─────────────────────┐
           │                                           │
           ▼                                           ▼
- Event: AtmosCapabilityChanged             Event: audioModeChanged
- (from DisplaySettings)                    (from PlayerInfo)
+ DS HAL: OnDolbyAtmosCapabilitiesChanged    DS HAL: OnAudioModeEvent
+ (device::Host::IAudioOutputPortEvents)    (device::Host::IAudioOutputPortEvents)
           │                                           │
           ▼                                           ▼
-  Update _atmosCapability                  Update _soundMode
-  Recompute using cached _soundMode        Recompute using cached _atmosCapability
+  Update _atmosMetaData                    Update _soundMode
+  Recompute using cached _soundMode        Recompute using cached _atmosMetaData
           │                                           │
           └────────────────┬──────────────────────────┘
                            │
@@ -95,30 +95,27 @@ Both values are obtained from `Exchange::IPlayerInfo` via COM-RPC at initialisat
 - **REQ-04**: `dolbyAtmosExperience` MUST return `false` when `AtmosCapability == ATMOS_METADATA` but `soundMode` is one of `{ MONO, STEREO, SURROUND, DOLBYDIGITAL, UNKNOWN }`.
 - **REQ-05**: The plugin MUST send an `onDolbyAtmosExperienceChanged` notification to all subscribers whenever the computed `dolbyAtmosExperience` value changes.
 - **REQ-06**: The notification payload MUST include a `dolbyAtmosExperience` boolean field.
-- **REQ-07**: The plugin MUST listen to the `AtmosCapabilityChanged` event from `DisplaySettings` (via COM-RPC) to detect changes in AtmosCapability.
-- **REQ-08**: The plugin MUST listen to the `audioModeChanged` event from `PlayerInfo` (via COM-RPC) to detect changes in soundMode.
-- **REQ-09**: The plugin MUST fetch initial values of `AtmosCapability` and `soundMode` from `PlayerInfo` at startup via COM-RPC and populate the internal cache before processing any client requests.
-- **REQ-10**: The plugin MUST handle the case where `PlayerInfo` or `DisplaySettings` is not yet activated at startup — it MUST register for `StateChange` notifications and acquire the interface when those plugins become available.
-- **REQ-11**: On deactivation of `PlayerInfo` or `DisplaySettings`, the plugin MUST unregister its notification listener and release the interface pointer.
-- **REQ-12**: All inter-plugin communication MUST use COM-RPC (`QueryInterfaceByCallsign`). JSON-RPC and `LinkType` are PROHIBITED for inter-plugin calls.
-- **REQ-13**: The plugin MUST NOT remove or modify `PlayerInfo.AtmosMetadata` or `PlayerInfo.soundMode`.
-- **REQ-14**: The plugin MUST return `Core::ERROR_NONE` on success and `Core::ERROR_GENERAL` on error (propagated as Firebolt errors).
-- **REQ-15**: The plugin MUST be thread-safe; a `Core::CriticalSection` MUST protect all cache reads and writes.
-- **REQ-16**: The plugin MUST run out-of-process (mode `LOCAL`) by default.
+- **REQ-07**: The plugin MUST listen to the `OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t, bool)` DS HAL event via `device::Host::IAudioOutputPortEvents` to detect changes in AtmosCapability.
+- **REQ-08**: The plugin MUST listen to the `OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t)` DS HAL event via `device::Host::IAudioOutputPortEvents` to detect changes in soundMode.
+- **REQ-09**: The plugin MUST call `device::Manager::Initialize()` at construction and query initial `AtmosCapability` and `soundMode` values directly from the DS HAL via `device::Host` before processing any client requests.
+- **REQ-10**: The plugin MUST NOT remove or modify `PlayerInfo.AtmosMetadata` or `PlayerInfo.soundMode`.
+- **REQ-11**: The plugin MUST return `Core::ERROR_NONE` on success and propagate errors appropriately.
+- **REQ-12**: The plugin MUST be thread-safe; a `Core::CriticalSection` MUST protect all cache reads and writes.
+- **REQ-13**: The plugin MUST run in-process (mode `Off`) by default.
 
 ### Interface Requirements
 
-- **REQ-17**: A new Thunder interface `Exchange::IAudioOutput` MUST be created in ThunderInterfaces.
-- **REQ-18**: `IAudioOutput` MUST expose `DolbyAtmosExperience(bool& enabled)`, `Register(INotification*)`, and `Unregister(INotification*)`.
-- **REQ-19**: `IAudioOutput::INotification` MUST expose `OnDolbyAtmosExperienceChanged(bool dolbyAtmosExperience)`.
-- **REQ-20**: JSON-RPC autogenerated stubs (`JAudioOutput.h`, `JsonData_AudioOutput.h`) MUST be generated from `IAudioOutput.h` via the Thunder code generator.
-- **REQ-21**: `ID_AUDIO_OUTPUT` and `ID_AUDIO_OUTPUT_NOTIFICATION` MUST be allocated in `interfaces/Ids.h` in ThunderInterfaces.
+- **REQ-14**: A new Thunder interface `Exchange::IAudioOutput` MUST be created in ThunderInterfaces.
+- **REQ-15**: `IAudioOutput` MUST expose `DolbyAtmosExperience(bool& enabled)`, `Register(INotification*)`, and `Unregister(INotification*)`.
+- **REQ-16**: `IAudioOutput::INotification` MUST expose `OnDolbyAtmosExperienceChanged(bool dolbyAtmosExperience)`.
+- **REQ-17**: JSON-RPC autogenerated stubs (`JAudioOutput.h`, `JsonData_AudioOutput.h`) MUST be generated from `IAudioOutput.h` via the Thunder code generator.
+- **REQ-18**: `ID_AUDIO_OUTPUT` and `ID_AUDIO_OUTPUT_NOTIFICATION` MUST be allocated in `interfaces/Ids.h` in ThunderInterfaces.
 
 ### Build Requirements
 
-- **REQ-22**: The build system MUST produce two shared libraries: `lib${NAMESPACE}AudioOutput.so` (plugin shell) and `lib${NAMESPACE}AudioOutputImplementation.so` (business logic).
-- **REQ-23**: All CMake targets MUST use `${NAMESPACE}` instead of hardcoded framework names.
-- **REQ-24**: `MODULE_NAME` MUST be defined as `Plugin_AudioOutput` in `Module.h`.
+- **REQ-19**: The build system MUST produce two shared libraries: `lib${NAMESPACE}AudioOutput.so` (plugin shell) and `lib${NAMESPACE}AudioOutputImplementation.so` (business logic).
+- **REQ-20**: All CMake targets MUST use `${NAMESPACE}` instead of hardcoded framework names.
+- **REQ-21**: `MODULE_NAME` MUST be defined as `Plugin_AudioOutput` in `Module.h`.
 
 ---
 
@@ -127,77 +124,57 @@ Both values are obtained from `Exchange::IPlayerInfo` via COM-RPC at initialisat
 ### Component Structure
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    Thunder Framework                         │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │          AudioOutput Plugin Shell (JSONRPC)            │  │
-│  │  ┌──────────────────────────────────────────────────┐  │  │
-│  │  │   AudioOutput.cpp/.h                             │  │  │
-│  │  │   - PluginHost::IPlugin, PluginHost::JSONRPC     │  │  │
-│  │  │   - Exchange::JAudioOutput::Register/Unregister  │  │  │
-│  │  │   - Handles out-of-process crash recovery        │  │  │
-│  │  └──────────────────────────────────────────────────┘  │  │
-│  │                        │ COM-RPC                        │  │
-│  │                        ▼                               │  │
-│  │  ┌──────────────────────────────────────────────────┐  │  │
-│  │  │  AudioOutputImplementation.cpp/.h                │  │  │
-│  │  │  - Exchange::IAudioOutput                        │  │  │
-│  │  │  - PluginHost::IPlugin::INotification            │  │  │
-│  │  │  - IPlayerInfo::INotification                    │  │  │
-│  │  │  - IDisplaySettings::INotification               │  │  │
-│  │  │  - Internal cache + decision logic               │  │  │
-│  │  └──────────────────────────────────────────────────┘  │  │
-│  └────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-          │ COM-RPC                       │ COM-RPC
-          ▼                               ▼
-   ┌─────────────┐               ┌──────────────────┐
-   │ PlayerInfo  │               │ DisplaySettings  │
-   │ plugin      │               │ plugin           │
-   │ - AtmosMetadata             │ - AtmosCapability│
-   │ - soundMode │               │   Changed event  │
-   │ - audioMode │               └──────────────────┘
-   │   Changed   │
-   └─────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                  Thunder Framework (in-process)                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │        AudioOutput Plugin Shell (JSONRPC)                  │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │   AudioOutput.cpp/.h                                 │  │  │
+│  │  │   - PluginHost::IPlugin, PluginHost::JSONRPC         │  │  │
+│  │  │   - Exchange::JAudioOutput::Register/Unregister      │  │  │
+│  │  │   - Exchange::IConfiguration::Configure              │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  │                    │ direct call (in-process)               │  │
+│  │                    ▼                                        │  │
+│  │  ┌──────────────────────────────────────────────────────┐  │  │
+│  │  │  AudioOutputImplementation.cpp/.h                    │  │  │
+│  │  │  - Exchange::IAudioOutput                            │  │  │
+│  │  │  - Exchange::IConfiguration                          │  │  │
+│  │  │  - DsAudioPortNotification (inner class)             │  │  │
+│  │  │      implements IAudioOutputPortEvents               │  │  │
+│  │  │  - Internal cache + decision logic                   │  │  │
+│  │  └──────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                    │ DS HAL callbacks                             │
+│                    ▼                                             │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  DeviceSettings HAL (dshal / device::Host)                 │  │
+│  │  - OnAudioModeEvent                                        │  │
+│  │  - OnDolbyAtmosCapabilitiesChanged                        │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Plugin Shell: AudioOutput.h / AudioOutput.cpp
 
 - Inherits from `PluginHost::IPlugin` and `PluginHost::JSONRPC`.
 - Interface map: `INTERFACE_ENTRY(IPlugin)`, `INTERFACE_ENTRY(IDispatcher)`, `INTERFACE_AGGREGATE(Exchange::IAudioOutput, _audioOutput)`.
-- `Initialize()`: Acquire `AudioOutputImplementation` via `_service->Root<Exchange::IAudioOutput>()`, register JSON-RPC stubs via `Exchange::JAudioOutput::Register(*this, _audioOutput)`.
-- `Deinitialize()`: `Exchange::JAudioOutput::Unregister(*this)`, release `_audioOutput`.
-- `Deactivated(RPC::IRemoteConnection*)`: handle out-of-process crash recovery.
+- `Initialize()`: Acquire `AudioOutputImplementation` via `_service->Root<Exchange::IAudioOutput>()` (in-process), call `Exchange::IConfiguration::Configure()`, then register JSON-RPC stubs via `Exchange::JAudioOutput::Register(*this, _audioOutput)`.
+- `Deinitialize()`: `Exchange::JAudioOutput::Unregister(*this)`, release `_audioOutput`, `_configure`, `_service`.
 
 ### Implementation: AudioOutputImplementation.h / .cpp
 
-- Inherits `Exchange::IAudioOutput` and `PluginHost::IPlugin::INotification` (for StateChange).
-- Inherits IPlayerInfo notification interface (to receive `audioModeChanged`).
-- Inherits IDisplaySettings notification interface (to receive `AtmosCapabilityChanged`).
+- Inherits `Exchange::IAudioOutput` and `Exchange::IConfiguration`.
+- Contains inner class `DsAudioPortNotification` implementing `device::Host::IAudioOutputPortEvents`, registered via `device::Host::getInstance().Register()` at construction.
+- Relevant HAL callbacks implemented: `OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t)` and `OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t, bool)`; all other `IAudioOutputPortEvents` callbacks are stubs.
 - `SERVICE_REGISTRATION(AudioOutputImplementation, 1, 0)` macro required.
-- Thread-safe: use `Core::CriticalSection` to protect cache reads/writes.
+- Thread-safe: use `Core::CriticalSection _adminLock` to protect cache reads/writes.
 
 ### Initialisation Sequence
 
-1. Call `_service->Register(this)` to monitor plugin lifecycle state changes.
-2. Check if `org.rdk.PlayerInfo` is already `ACTIVATED` — if so, acquire `IPlayerInfo` and:
-   - Read initial `AtmosMetadata` → populate `_atmosCapability` cache.
-   - Read initial `soundMode` → populate `_soundMode` cache.
-   - Register `this` as a notification listener on `IPlayerInfo`.
-3. Check if `org.rdk.DisplaySettings` is already `ACTIVATED` — if so, acquire `IDisplaySettings` and register `this` as a notification listener.
-4. Compute initial `_dolbyAtmosExperience` from the two cached values.
-
-### StateChange Handling
-
-```
-Plugin ACTIVATED:
-  └─ org.rdk.PlayerInfo      → acquire IPlayerInfo, read initial values, register listener
-  └─ org.rdk.DisplaySettings → acquire IDisplaySettings, register listener
-
-Plugin DEACTIVATED:
-  └─ org.rdk.PlayerInfo      → unregister listener, Release() IPlayerInfo pointer
-  └─ org.rdk.DisplaySettings → unregister listener, Release() IDisplaySettings pointer
-```
+1. Constructor: call `device::Manager::Initialize()`; call `device::Host::getInstance().Register(&_dsAudioPortNotification, ...)` to subscribe to DS HAL events.
+2. `Configure(IShell*)` (called by plugin shell after `Root<>()`): call `UpdateCache()` which queries `AtmosMetadata()` and `SoundMode()` directly from the HAL and populates `_atmosMetaData`, `_soundMode`, and `_dolbyAtmosExperience`.
+3. Destructor: unregister from DS HAL via `device::Host::getInstance().UnRegister()`, call `device::Manager::DeInitialize()`.
 
 ### Module Files
 
@@ -232,8 +209,8 @@ Both `.so` files installed to `${CMAKE_INSTALL_PREFIX}/lib/${STORAGE_DIRECTORY}/
 
 CMake cache options:
 ```cmake
-set(PLUGIN_AUDIOOUTPUT_MODE "LOCAL" CACHE STRING "AudioOutput execution mode (LOCAL=OOP, OFF=in-process)")
-set(PLUGIN_AUDIOOUTPUT_AUTOSTART "false" CACHE STRING "Automatically start AudioOutput plugin")
+set(PLUGIN_AUDIOOUTPUT_MODE "Off" CACHE STRING "AudioOutput execution mode (Off=in-process, LOCAL=out-of-process)")
+set(PLUGIN_AUDIOOUTPUT_AUTOSTART "True" CACHE STRING "Automatically start AudioOutput plugin")
 set(PLUGIN_AUDIOOUTPUT_STARTUPORDER "" CACHE STRING "Startup order for AudioOutput plugin")
 ```
 
@@ -318,14 +295,15 @@ namespace Exchange {
 }
 ```
 
-### Inter-Plugin Communication
+### DS HAL Event Sources
 
-| Plugin          | Callsign                   | Interface                    | Purpose |
-|----------------|---------------------------|------------------------------|---------|
-| PlayerInfo      | `org.rdk.PlayerInfo`      | `Exchange::IPlayerInfo`      | Read initial AtmosMetadata + soundMode; receive `audioModeChanged` event |
-| DisplaySettings | `org.rdk.DisplaySettings` | `Exchange::IDisplaySettings` | Receive `AtmosCapabilityChanged` event |
+| HAL Callback | DS HAL Interface | Trigger |
+|---|---|---|
+| `OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t)` | `device::Host::IAudioOutputPortEvents` | Audio stereo mode changes on any port |
+| `OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t, bool)` | `device::Host::IAudioOutputPortEvents` | Sink device ATMOS capability changes |
 
-- Communication is **COM-RPC only** (`QueryInterfaceByCallsign`). JSON-RPC and `LinkType` are prohibited.
+- Registered via `device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]")`.
+- No inter-plugin COM-RPC dependencies. The plugin is self-contained against the DS HAL.
 
 ### Error Codes
 
@@ -400,25 +378,61 @@ _Not applicable — the plugin does not handle user credentials, sensitive data,
 ## Conformance Testing & Validation
 
 - **L1 tests**: Unit tests for `AudioOutputImplementation` covering all combinations of `AtmosCapability` × `soundMode` values, including boundary conditions (ATMOS_METADATA + each soundMode variant).
-- **L2 tests (in-process)**: Integration tests verifying JSON-RPC method response and notification delivery with mocked `PlayerInfo` and `DisplaySettings` events.
-- **L2 tests (out-of-process)**: Same as L2 in-process but with the implementation running as a separate process.
+- **L2 tests (in-process)**: Integration tests verifying JSON-RPC method response and notification delivery with mocked DS HAL events.
 - All new tests MUST be added to the CI workflows (`L1-tests.yml`, `L2-tests.yml`, `L2-tests-oop.yml`) and the Coverity build script (`cov_build.sh`).
 
 ---
 
 ## Covered Code
 
-_No code mapping found. This plugin has not been implemented yet. Add file and method references here once implementation is complete._
+- plugin/AudioOutput.h:
+    - `AudioOutput` (class)
+    - `AudioOutput::Notification` (inner class)
+    - `AudioOutput::Notification::Initialize`
+    - `AudioOutput::Notification::Deinitialize`
+    - `AudioOutput::Notification::OnDolbyAtmosExperienceChanged`
+- plugin/AudioOutput.cpp:
+    - `AudioOutput::AudioOutput`
+    - `AudioOutput::~AudioOutput`
+    - `AudioOutput::Initialize`
+    - `AudioOutput::Deinitialize`
+    - `AudioOutput::Information`
+    - `AudioOutput::Deactivated`
+- plugin/AudioOutputImplementation.h:
+    - `AudioOutputImplementation` (class)
+    - `AudioOutputImplementation::DsAudioPortNotification` (inner class)
+    - `AudioOutputImplementation::DsAudioPortNotification::OnDolbyAtmosCapabilitiesChanged`
+    - `AudioOutputImplementation::DsAudioPortNotification::OnAudioModeEvent`
+- plugin/AudioOutputImplementation.cpp:
+    - `AudioOutputImplementation::AudioOutputImplementation`
+    - `AudioOutputImplementation::~AudioOutputImplementation`
+    - `AudioOutputImplementation::Configure`
+    - `AudioOutputImplementation::registerDsEventHandlers`
+    - `AudioOutputImplementation::unregisterDsEventHandlers`
+    - `AudioOutputImplementation::UpdateCache`
+    - `AudioOutputImplementation::DolbyAtmosExperience`
+    - `AudioOutputImplementation::Register`
+    - `AudioOutputImplementation::Unregister`
+    - `AudioOutputImplementation::onAudioModeChanged`
+    - `AudioOutputImplementation::onAtmosCapabilitiesChanged`
+    - `AudioOutputImplementation::SendNotify`
+    - `AudioOutputImplementation::EvaluateCurrentAtmosExperience`
+    - `AudioOutputImplementation::AtmosMetadata`
+    - `AudioOutputImplementation::SoundMode`
+    - `DsAudioModeToSoundMode` (static helper)
+- plugin/Module.h:
+    - `MODULE_NAME` definition (`Plugin_AudioOutput`)
+- plugin/Module.cpp:
+    - `MODULE_NAME_DECLARATION`
+- plugin/CMakeLists.txt:
+    - `WPEFrameworkAudioOutput` target
+    - `WPEFrameworkAudioOutputImplementation` target
 
 ---
 
 ## Open Queries
 
-- **OQ-01**: Confirm that `Exchange::IPlayerInfo` in the current ThunderInterfaces version exposes `AtmosMetadata()`, `soundMode()`, and an `INotification` interface with `audioModeChanged`. If not, the interface must be extended before implementation can begin.
-- **OQ-02**: Confirm the exact method/event name on `Exchange::IDisplaySettings` for the `AtmosCapabilityChanged` event. The event source was identified as `client.events.AtmosCapabilityChanged` in the original requirements.
 - **OQ-03**: `ID_AUDIO_OUTPUT` and `ID_AUDIO_OUTPUT_NOTIFICATION` need to be allocated in `interfaces/Ids.h` in ThunderInterfaces. Confirm the next available ID values.
-- **OQ-04**: Confirm whether the `DisplaySettings` `AtmosCapabilityChanged` event carries the new `AtmosCapability` value in its payload, or whether the implementation must re-query `IPlayerInfo` after receiving it.
-- **OQ-05**: Confirm whether a precondition on `PlayerInfo` or `DisplaySettings` should be added to `AudioOutput.conf.in`, or if the plugin must handle their absence gracefully at runtime (current design assumes graceful handling via `StateChange`).
 
 ---
 
@@ -434,3 +448,4 @@ _No code mapping found. This plugin has not been implemented yet. Add file and m
 
 - [2026-06-22] - openspec-explore - Initial spec created from feature requirements and reference codebase analysis.
 - [2026-06-23] - openspec-templater - Restructured to match spec template.
+- [2026-07-08] - openspec-templater - Updated to match actual implementation: in-process mode, DS HAL direct events, renumbered requirements, generated Covered Code section.

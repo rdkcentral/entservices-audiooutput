@@ -9,7 +9,7 @@ The plugin's primary purpose is to determine and expose the **Dolby Atmos Experi
 
 Both of these HAL queries are copied as private implementation methods into `AudioOutputImplementation`. They are **not** re-exposed as individual public APIs; they serve only the internal computation of `dolbyAtmosExperience`.
 
-The plugin follows the established two-library pattern used in `entservices-migration`: a thin plugin shell (`AudioOutput.so`) that handles lifecycle and JSON-RPC registration, and a separate out-of-process implementation library (`AudioOutputImplementation.so`) that contains the business logic.
+The plugin follows the established two-library pattern used in `entservices-migration`: a thin plugin shell (`AudioOutput.so`) that handles lifecycle and JSON-RPC registration, and an in-process implementation library (`AudioOutputImplementation.so`) that contains the business logic.
 
 **Reference implementations used:**
 - Plugin shell pattern: `entservices-migration/plugin/Migration.cpp`
@@ -23,8 +23,8 @@ The plugin follows the established two-library pattern used in `entservices-migr
 - Expose `dolbyAtmosExperience` as a single JSON-RPC method and COM-RPC interface method.
 - Fire `onDolbyAtmosExperienceChanged` notifications to all subscribers when the state changes.
 - Copy `AtmosMetadata` and `SoundMode` HAL query logic verbatim from `entservices-playerinfo` as private methods.
-- Subscribe to `AtmosCapabilityChanged` (DisplaySettings) and `audioModeChanged` (PlayerInfo) COM-RPC events to maintain cache and trigger notifications.
-- Run out-of-process (mode `LOCAL`) by default for isolation.
+- Register for DS HAL events (`OnDolbyAtmosCapabilitiesChanged` and `OnAudioModeEvent`) via `device::Host::IAudioOutputPortEvents` to maintain cache and trigger notifications.
+- Run in-process (mode `Off`) by default.
 
 **Non-Goals:**
 - Do NOT remove or modify `PlayerInfo.AtmosMetadata` or `PlayerInfo.soundMode`.
@@ -44,21 +44,21 @@ The plugin follows the established two-library pattern used in `entservices-migr
 
 ---
 
-### Decision 2: Use Exchange::Dolby::IOutput::INotification for change events
+### Decision 2: Use DS HAL IAudioOutputPortEvents for change events
 
-**Choice:** Subscribe to `Exchange::Dolby::IOutput::INotification::AudioModeChanged` (from PlayerInfo) and `Exchange::IDisplaySettings` (or DisplaySettings equivalent) for `AtmosCapabilityChanged` via COM-RPC event registration.
+**Choice:** Register a `DsAudioPortNotification` inner class (implementing `device::Host::IAudioOutputPortEvents`) directly with the DeviceSettings HAL via `device::Host::getInstance().Register()`. The two relevant callbacks are `OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t)` and `OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t, bool)`.
 
-**Rationale:** The `AudioModeChanged` event is already emitted by `PlayerInfoImplementation` whenever the audio mode changes (see `audiomodeChanged()` in `PlatformImplementation.cpp`). Subscribing via the COM-RPC notification interface is the correct, low-latency, in-process-friendly approach.
+**Rationale:** The DeviceSettings HAL emits these events natively without requiring any inter-plugin dependency on `PlayerInfo` or `DisplaySettings`. Direct HAL registration avoids COM-RPC overhead, removes the need for `StateChange` monitoring, and eliminates runtime coupling to other plugins. This is simpler, more reliable, and consistent with how `AudioOutputImplementation` already queries the HAL for `AtmosMetadata` and `SoundMode`.
 
-**For `AtmosCapabilityChanged`:** Subscribing to the DisplaySettings plugin's notification interface via COM-RPC follows the same pattern.
+**Alternative considered:** COM-RPC subscription to `Exchange::Dolby::IOutput::INotification` (PlayerInfo) and `Exchange::IDisplaySettings` (DisplaySettings). Rejected because it requires both plugins to be active, introduces IPC latency, and adds complex `StateChange` lifecycle management.
 
 ---
 
-### Decision 3: Out-of-process plugin (LOCAL mode)
+### Decision 3: In-process plugin (Off mode)
 
-**Choice:** Default plugin mode is `LOCAL` (out-of-process).
+**Choice:** Default plugin mode is `Off` (in-process).
 
-**Rationale:** Consistent with other entservices plugins. Provides process isolation — a crash in the implementation does not bring down the Thunder framework. The plugin shell handles `RPC::IRemoteConnection::INotification` for crash recovery.
+**Rationale:** The `AudioOutputImplementation` registers directly with the DS HAL via `device::Host::IAudioOutputPortEvents`. Running in-process avoids the overhead of an out-of-process bridge for a lightweight plugin that performs only boolean HAL queries. The two-library build structure is preserved for future flexibility, but the runtime default is in-process.
 
 ---
 
@@ -80,14 +80,11 @@ The plugin follows the established two-library pattern used in `entservices-migr
 
 | Risk | Mitigation |
 |------|-----------|
-| DisplaySettings `AtmosCapabilityChanged` event interface not yet defined in `Exchange::IDisplaySettings` | Verify interface availability; if absent, raise a ThunderInterfaces PR to add it before implementation starts (tracked as OQ-02 in spec) |
-| PlayerInfo or DisplaySettings not yet activated when AudioOutput initialises | Use `PluginHost::IShell::INotification` (`StateChange`) to detect activation and register late; initialise cache to `false` until both values are available |
-| HAL query copy drift — if PlayerInfo's `AtmosMetadata` or `SoundMode` logic is updated, AudioOutput's copy becomes stale | Acceptable risk; the spec notes these APIs may be deprecated in future. Document the source reference clearly in the code |
+| HAL query copy drift — if PlayerInfo's `AtmosMetadata` or `SoundMode` logic is updated, AudioOutput's copy becomes stale | Acceptable risk; the spec notes these APIs may be deprecated in future. Source reference is documented in code comments |
 | `ID_AUDIO_OUTPUT` not yet allocated in `interfaces/Ids.h` | Must be allocated in ThunderInterfaces before the interface header can be compiled; tracked as OQ-03 in spec |
-| Thread safety — event callbacks arrive on a different thread from client JSON-RPC calls | Protect all cache reads and writes with `Core::CriticalSection _adminLock` |
+| Thread safety — DS HAL event callbacks (`OnAudioModeEvent`, `OnDolbyAtmosCapabilitiesChanged`) arrive on a different thread from client JSON-RPC calls | Protect all cache reads and writes with `Core::CriticalSection _adminLock` |
+| DS HAL `device::Manager::Initialize()` failure at construction | Logged as a warning; cache defaults to `false`; plugin continues to serve requests with default values |
 
 ## Open Questions
 
-- **OQ-02**: What is the exact COM-RPC event/method name on `Exchange::IDisplaySettings` for `AtmosCapabilityChanged`? Must be confirmed before implementing the DisplaySettings subscription.
-- **OQ-03**: What are the next available IDs in `interfaces/Ids.h` for `ID_AUDIO_OUTPUT` and `ID_AUDIO_OUTPUT_NOTIFICATION`?
-- **OQ-04**: Does the `AtmosCapabilityChanged` event payload carry the new capability value, or must we re-query after receiving it?
+- **OQ-03**: What are the next available IDs in `interfaces/Ids.h` for `ID_AUDIO_OUTPUT` and `ID_AUDIO_OUTPUT_NOTIFICATION`? _(Must be confirmed/allocated in ThunderInterfaces.)_
