@@ -49,9 +49,13 @@ git clone --branch  R4.4.3 https://github.com/rdkcentral/ThunderTools.git
 
 git clone --branch R4.4.1 https://github.com/rdkcentral/Thunder.git
 
-git clone --branch develop https://github.com/rdkcentral/entservices-apis.git
+git clone --branch feature/RDKEMW-20294 https://github.com/rdkcentral/entservices-apis.git
 
-git clone --branch 1.0.1 https://github.com/rdkcentral/entservices-testframework.git
+cd ..
+git clone --branch develop https://github.com/rdkcentral/entservices-helpers.git
+cd "$GITHUB_WORKSPACE"
+
+git clone --branch 1.0.14 https://github.com/rdkcentral/entservices-testframework.git
 
 ############################
 # Build Thunder-Tools
@@ -114,6 +118,34 @@ cmake -G Ninja -S entservices-apis  -B build/entservices-apis \
 cmake --build build/entservices-apis --target install
 
 ############################
+# generating minimal mock headers
+cd $GITHUB_WORKSPACE/entservices-testframework/Tests
+mkdir -p headers
+cd headers
+touch secure_wrapper.h
+touch wpa_ctrl.h
+touch rdk_logger_milestone.h
+mkdir -p rdk/iarmbus
+touch rdk/iarmbus/libIARM.h
+touch rdk/iarmbus/libIBus.h
+touch iarm.h
+cd $GITHUB_WORKSPACE
+#########################################
+# Build entservices-helpers
+echo "======================================================================================"
+echo "building entservices-helpers"
+cmake -G Ninja -S ../entservices-helpers -B build/entservices-helpers \
+    -DEXCEPTIONS_ENABLE=ON \
+    -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr" \
+    -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake" \
+    -DUSE_THUNDER_R4=ON \
+    -DHIDE_NON_EXTERNAL_SYMBOLS=OFF \
+    -DPLUGIN_HELPERS=ON \
+    "-DCMAKE_CXX_FLAGS=-I$GITHUB_WORKSPACE/entservices-testframework/Tests/mocks -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h " \
+
+cmake --build build/entservices-helpers --target install
+
+############################
 # generating extrnal headers
 cd $GITHUB_WORKSPACE
 cd entservices-testframework/Tests
@@ -128,19 +160,20 @@ echo "==========================================================================
 echo "empty headers creation"
 cd headers
 echo "current working dir: "${PWD}
-touch rdk/ds/audioOutputPort.hpp
-touch rdk/ds/audioOutputPortType.hpp
-touch rdk/ds/audioOutputPortConfig.hpp
+touch rdk/ds/host.hpp
+touch rdk/ds/list.hpp
+touch rdk/ds/hdmiIn.hpp
+touch rdk/ds/manager.hpp
+touch rdk/ds/exception.hpp
 touch rdk/ds/dsAudio.h
 touch rdk/ds/dsError.h
 touch rdk/ds/dsMgr.h
 touch rdk/ds/dsTypes.h
 touch rdk/ds/dsUtl.h
-touch rdk/ds/exception.hpp
-touch rdk/ds/hdmiIn.hpp
-touch rdk/ds/host.hpp
-touch rdk/ds/list.hpp
-touch rdk/ds/manager.hpp
+touch rdk/ds/audioOutputPort.hpp
+touch rdk/ds/audioOutputPortType.hpp
+touch rdk/ds/audioOutputPortConfig.hpp
+touch rdk/ds/audioStereoMode.hpp
 touch rdk/ds/sleepMode.hpp
 touch rdk/ds/videoDevice.hpp
 touch rdk/ds/videoOutputPort.hpp
