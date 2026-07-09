@@ -22,7 +22,6 @@
 #include "Module.h"
 #include <interfaces/Ids.h>
 #include <interfaces/IAudioOutput.h>
-#include <interfaces/IDolby.h>
 #include <interfaces/IConfiguration.h>
 
 #include <com/com.h>
@@ -88,7 +87,7 @@ namespace Plugin {
             void OnAudioSecondaryLanguageChanged(const std::string&) override {}
             void OnAudioModeEvent(dsAudioPortType_t type, dsAudioStereoMode_t smode) override
             {
-                _parent.
+                _parent.onAudioModeChanged(type, smode);
             }
 
         private:
@@ -98,7 +97,7 @@ namespace Plugin {
     private:
         // HAL query helpers — logic copied from entservices-playerinfo PlatformImplementation.cpp
         uint32_t AtmosMetadata(bool& supported) const;
-        uint32_t SoundMode(Exchange::Dolby::IOutput::SoundModes& mode) const;
+        uint32_t SoundMode(Exchange::IAudioOutput::SoundModes& mode) const;
 
         bool EvaluateCurrentAtmosExperience() const;
 
@@ -114,7 +113,7 @@ namespace Plugin {
 
         // Cached values
         bool _atmosMetaData{false};
-        Exchange::Dolby::IOutput::SoundModes _soundMode{Exchange::Dolby::IOutput::UNKNOWN};
+        Exchange::IAudioOutput::SoundModes _soundMode{Exchange::IAudioOutput::UNKNOWN};
         bool _dolbyAtmosExperience{false};
 
         // Observer list
