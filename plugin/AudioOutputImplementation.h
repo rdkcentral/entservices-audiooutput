@@ -86,9 +86,9 @@ namespace Plugin {
             void OnAudioFaderControlChanged(int) override {}
             void OnAudioPrimaryLanguageChanged(const std::string&) override {}
             void OnAudioSecondaryLanguageChanged(const std::string&) override {}
-            void OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t smode) override
+            void OnAudioModeEvent(dsAudioPortType_t type, dsAudioStereoMode_t smode) override
             {
-                _parent.onAudioModeChanged(smode);
+                _parent.
             }
 
         private:
@@ -106,7 +106,7 @@ namespace Plugin {
         void UpdateCache();
         void registerDsEventHandlers();
         void unregisterDsEventHandlers();
-        void onAudioModeChanged(dsAudioStereoMode_t smode);
+        void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
         void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
 
     private:
