@@ -33,7 +33,7 @@
 namespace WPEFramework {
 namespace Plugin {
 
-    static Exchange::Dolby::IOutput::SoundModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
+    static Exchange::IAudioOutput::SoundModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
     SERVICE_REGISTRATION(AudioOutputImplementation, 1, 0);
 
     // -------------------------------------------------------------------------
@@ -81,7 +81,7 @@ namespace Plugin {
             LOGERR("UpdateCache: failed to get atmos metadata from HAL");
         }
 
-        Exchange::Dolby::IOutput::SoundModes mode = Exchange::Dolby::IOutput::UNKNOWN;
+        Exchange::IAudioOutput::SoundModes mode = Exchange::IAudioOutput::UNKNOWN;
         if (SoundMode(mode) != Core::ERROR_NONE) {
             LOGERR("UpdateCache: failed to get sound mode from HAL");
         }
@@ -194,16 +194,33 @@ namespace Plugin {
     // DS HAL callback for OnAudioModeEvent (IAudioOutputPortEvents)
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::onAudioModeChanged(dsAudioPortType_t aPort, dsAudioStereoMode_t smode)
+    void AudioOutputImplementation::onAudioModeChanged(dsAudioPortType_t portType, dsAudioStereoMode_t smode)
     {
-        LOGINFO("AudioOutputImplementation::onAudioModeChanged: smode=%d", static_cast<int>(smode));
-        if ((aPort.getType().getId() == device::AudioOutputPortType::kARC || aPort.getType().getId() == device::AudioOutputPortType::kSPDIF || aPort.getType().getId() == device::AudioOutputPortType::kHDMI)
-                            && aPort.getStereoAuto()) {
-            mode = Exchange::IAudioOutput::SOUND_MODE_AUTO;
-        } else {
-            mode = dsAudioModeToSoundMode(smode);
+        LOGINFO("AudioOutputImplementation::onAudioModeChanged: portType=%d, smode=%d",
+                static_cast<int>(portType), static_cast<int>(smode));
+
+        Exchange::IAudioOutput::SoundModes mode = Exchange::IAudioOutput::UNKNOWN;
+       
+        try {
+            device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
+            for (size_t i = 0; i < aPorts.size(); i++) {
+                device::AudioOutputPort &aPortObj = aPorts.at(i);
+                dsAudioPortType_t typeId = static_cast<dsAudioPortType_t>(aPortObj.getType().getId());
+                if ((typeId == portType) &&
+                    (typeId == dsAUDIOPORT_TYPE_HDMI_ARC ||
+                     typeId == dsAUDIOPORT_TYPE_SPDIF ||
+                     typeId == dsAUDIOPORT_TYPE_HDMI) && aPortObj.getStereoAuto()) {
+                    mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
+                    break;
+                } else if (typeId == portType) {
+                    mode = DsAudioModeToSoundMode(device::AudioStereoMode(smode));
+                    break;
+                }
+            }
+        } catch (const device::Exception& err) {
+            TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
         }
-     
+
         _adminLock.Lock();
         _soundMode = mode;
         _adminLock.Unlock();
@@ -262,9 +279,9 @@ namespace Plugin {
        // }
 
         switch (_soundMode) {
-        case Exchange::Dolby::IOutput::PASSTHRU:
-        case Exchange::Dolby::IOutput::DOLBYDIGITALPLUS:
-	case Exchange::Dolby::IOutput::SOUNDMODE_AUTO:
+        case Exchange::IAudioOutput::PASSTHRU:
+        case Exchange::IAudioOutput::DOLBYDIGITALPLUS:
+	    case Exchange::IAudioOutput::SOUNDMODE_AUTO:
             return true;
         default:
             return false;
@@ -318,22 +335,22 @@ namespace Plugin {
     // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
     // -------------------------------------------------------------------------
 
-    static Exchange::Dolby::IOutput::SoundModes DsAudioModeToSoundMode(
+    static Exchange::IAudioOutput::SoundModes DsAudioModeToSoundMode(
         const device::AudioStereoMode& smode)
     {
-        if (smode == device::AudioStereoMode::kMono)     return Exchange::Dolby::IOutput::MONO;
-        if (smode == device::AudioStereoMode::kStereo)   return Exchange::Dolby::IOutput::STEREO;
-        if (smode == device::AudioStereoMode::kSurround) return Exchange::Dolby::IOutput::SURROUND;
-        if (smode == device::AudioStereoMode::kPassThru) return Exchange::Dolby::IOutput::PASSTHRU;
-        if (smode == device::AudioStereoMode::kDD)       return Exchange::Dolby::IOutput::DOLBYDIGITAL;
-        if (smode == device::AudioStereoMode::kDDPlus)   return Exchange::Dolby::IOutput::DOLBYDIGITALPLUS;
+        if (smode == device::AudioStereoMode::kMono)     return Exchange::IAudioOutput::MONO;
+        if (smode == device::AudioStereoMode::kStereo)   return Exchange::IAudioOutput::STEREO;
+        if (smode == device::AudioStereoMode::kSurround) return Exchange::IAudioOutput::SURROUND;
+        if (smode == device::AudioStereoMode::kPassThru) return Exchange::IAudioOutput::PASSTHRU;
+        if (smode == device::AudioStereoMode::kDD)       return Exchange::IAudioOutput::DOLBYDIGITAL;
+        if (smode == device::AudioStereoMode::kDDPlus)   return Exchange::IAudioOutput::DOLBYDIGITALPLUS;
         LOGWARN("Unknown AudioStereoMode encountered, returning UNKNOWN");
-        return Exchange::Dolby::IOutput::UNKNOWN;
+        return Exchange::IAudioOutput::UNKNOWN;
     }
 
-    uint32_t AudioOutputImplementation::SoundMode(Exchange::Dolby::IOutput::SoundModes& mode) const
+    uint32_t AudioOutputImplementation::SoundMode(Exchange::IAudioOutput::SoundModes& mode) const
     {
-	    mode = Exchange::Dolby::IOutput::UNKNOWN;
+	    mode = Exchange::IAudioOutput::UNKNOWN;
         std::vector<std::string> hdmiArcPorts, hdmiPorts, speakerPorts, spdifPorts, headphonePorts;
 
         try {
@@ -375,12 +392,14 @@ namespace Plugin {
                 device::AudioOutputPort aPort = device::Host::getInstance().getAudioOutputPort(selectedPort);
                 if (aPort.isConnected()) {
                     device::AudioStereoMode soundmode = aPort.getStereoMode();
-                    mode = dsAudioModeToSoundMode(soundmode);
-                 
-		            if ((aPort.getType().getId() == device::AudioOutputPortType::kARC || aPort.getType().getId() == device::AudioOutputPortType::kSPDIF || aPort.getType().getId() == device::AudioOutputPortType::kHDMI)
+                    mode = DsAudioModeToSoundMode(soundmode);
+
+                    if ((aPort.getType().getId() == device::AudioOutputPortType::kARC ||
+                         aPort.getType().getId() == device::AudioOutputPortType::kSPDIF ||
+                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI)
                             && aPort.getStereoAuto()) {
-                        mode = SOUNDMODE_AUTO;
-			            LOGINFO("setting audio mode as auto");
+                        mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
+                        LOGINFO("setting audio mode as auto");
                     }
                     LOGINFO("Audio port %s has sound mode %d", selectedPort.c_str(), mode);
                 } else {
