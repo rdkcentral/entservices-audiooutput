@@ -70,7 +70,7 @@ namespace Plugin {
                 : _parent(parent)
             {
             }
-            ~DsAudioPortNotification() override = default;
+            ~DsAudioPortNotification() = default;
 
         public:
             void OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status) override
