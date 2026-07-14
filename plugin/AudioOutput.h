@@ -41,29 +41,10 @@ namespace Plugin {
 
             explicit Notification(AudioOutput* parent)
                 : _parent(*parent)
-                , _client(nullptr)
             {
                 ASSERT(parent != nullptr);
             }
             ~Notification() override = default;
-
-            void Initialize(Exchange::IAudioOutput* client)
-            {
-                ASSERT(client != nullptr);
-                _client = client;
-                _client->AddRef();
-                _client->Register(this);
-            }
-
-            void Deinitialize()
-            {
-                ASSERT(_client != nullptr);
-                if (_client != nullptr) {
-                    _client->Unregister(this);
-                    _client->Release();
-                    _client = nullptr;
-                }
-            }
 
             void OnDolbyAtmosExperienceChanged(const bool dolbyAtmosExperience) override
             {
@@ -78,7 +59,6 @@ namespace Plugin {
 
         private:
             AudioOutput& _parent;
-            Exchange::IAudioOutput* _client;
         };
 
         class ConnectionNotification : public RPC::IRemoteConnection::INotification {
