@@ -111,8 +111,8 @@ namespace Plugin {
     void AudioOutputImplementation::unregisterDsEventHandlers()
     {
         if (_registeredDsEventHandlers) {
-            _registeredDsEventHandlers = false;
             device::Host::getInstance().UnRegister(&_dsAudioPortNotification);
+			_registeredDsEventHandlers = false;
             LOGINFO("Unregistered from IAudioOutputPortEvents");
         }
     }
