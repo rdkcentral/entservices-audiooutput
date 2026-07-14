@@ -237,11 +237,7 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: atmosCapability=%d, status=%d",
                 atmosCapability, static_cast<int>(status));
                 
-       if (!status) {
-            LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: Ignoring event..");
-	    return;
-       }
-       	_adminLock.Lock();
+     	_adminLock.Lock();
         _atmosMetaData = (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
         _adminLock.Unlock();
 
@@ -274,9 +270,9 @@ namespace Plugin {
 
     bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
     {
-      //  if (!_atmosMetaData) {
-        //    return false;
-       // }
+        if (!_atmosMetaData) {
+            return false;
+        }
 
         switch (_soundMode) {
         case Exchange::IAudioOutput::PASSTHRU:
