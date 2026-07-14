@@ -86,8 +86,10 @@ namespace Plugin {
             LOGERR("UpdateCache: failed to get sound mode from HAL");
         }
 
+        _adminLock.Lock();
         _atmosMetaData = cap;
         _soundMode = mode;
+        _adminLock.Unlock();
         UpdateCache();
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
