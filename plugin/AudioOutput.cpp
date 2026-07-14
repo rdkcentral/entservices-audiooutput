@@ -48,6 +48,7 @@ namespace WPEFramework {
             , _connectionId(0)
             , _audioOutput(nullptr)
             , _notification(this)
+            , _connectionNotification(this)
         {
             SYSLOG(Logging::Startup, (_T("AudioOutput Constructor")));
         }
@@ -85,6 +86,12 @@ namespace WPEFramework {
                 }
                 Exchange::JAudioOutput::Register(*this, _audioOutput);
                _notification.Initialize(_audioOutput);
+
+               RPC::IRemoteConnection* connection(_service->RemoteConnection(_connectionId));
+               if (connection != nullptr) {
+                   connection->Register(&_connectionNotification);
+                   connection->Release();
+               }
                
             } else {
                 SYSLOG(Logging::Startup, (_T("AudioOutput::Initialize: Failed to initialise AudioOutput plugin")));
@@ -110,6 +117,9 @@ namespace WPEFramework {
                 }
 
                 RPC::IRemoteConnection* connection = service->RemoteConnection(_connectionId);
+                if (connection != nullptr) {
+                    connection->Unregister(&_connectionNotification);
+                }
                 VARIABLE_IS_NOT_USED uint32_t result = _audioOutput->Release();
                 _audioOutput = nullptr;
 

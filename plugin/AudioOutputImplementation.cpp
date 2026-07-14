@@ -19,6 +19,8 @@
 
 #include "AudioOutputImplementation.h"
 
+#include <algorithm>
+#include <vector>
 #include <core/core.h>
 #include "UtilsLogging.h"
 
@@ -252,16 +254,22 @@ namespace Plugin {
 
     void AudioOutputImplementation::SendNotify(bool dolbyAtmosExperience)
     {
+        std::list<Exchange::IAudioOutput::INotification*> index;
+
         _adminLock.Lock();
-        std::list<Exchange::IAudioOutput::INotification*> index(_observers);
+        index = _observers;
+        for (auto* obs : index) {
+            obs->AddRef();
+        }
+        _adminLock.Unlock();
 
         LOGINFO("AudioOutputImplementation: SendNotify: notifying %zu observers of dolbyAtmosExperience=%s",
                 index.size(), dolbyAtmosExperience ? "true" : "false");
-        for (auto* itr : index) {
-            itr->OnDolbyAtmosExperienceChanged(dolbyAtmosExperience);
-        }
 
-        _adminLock.Unlock();
+        for (auto* obs : index) {
+            obs->OnDolbyAtmosExperienceChanged(dolbyAtmosExperience);
+            obs->Release();
+        }
     }
 
     // -------------------------------------------------------------------------
