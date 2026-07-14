@@ -24,7 +24,7 @@ GITHUB_WORKSPACE="${PWD}"
 ls -la ${GITHUB_WORKSPACE}
 ############################
 # Build entservices-audiooutput
-echo "buliding entservices-audiooutput"
+echo "building entservices-audiooutput"
 
 cd ${GITHUB_WORKSPACE}
 cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
