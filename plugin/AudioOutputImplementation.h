@@ -97,7 +97,7 @@ namespace Plugin {
     private:
         // HAL query helpers — logic copied from entservices-playerinfo PlatformImplementation.cpp
         uint32_t AtmosMetadata(bool& supported) const;
-        uint32_t SoundMode(Exchange::IAudioOutput::SoundModes& mode) const;
+        uint32_t SoundMode(Exchange::IAudioOutput::AudioModes& mode) const;
 
         bool EvaluateCurrentAtmosExperience() const;
 
@@ -113,7 +113,7 @@ namespace Plugin {
 
         // Cached values
         bool _atmosMetaData{false};
-        Exchange::IAudioOutput::SoundModes _soundMode{Exchange::IAudioOutput::UNKNOWN};
+        Exchange::IAudioOutput::AudioModes _soundMode{Exchange::IAudioOutput::UNKNOWN};
         bool _dolbyAtmosExperience{false};
 
         // Observer list

@@ -1,6 +1,6 @@
 precondition = ["Platform"]
 callsign = "org.rdk.AudioOutput"
-autostart = "@PLUGIN_SYSTEM_AUTOSTART@"
+autostart = "@PLUGIN_AUDIOOUTPUT_AUTOSTART@"
 startuporder = "@PLUGIN_AUDIOOUTPUT_STARTUPORDER@"
 
 configuration = JSON()

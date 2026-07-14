@@ -33,7 +33,7 @@
 namespace WPEFramework {
 namespace Plugin {
 
-    static Exchange::IAudioOutput::SoundModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
+    static Exchange::IAudioOutput::AudioModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
     SERVICE_REGISTRATION(AudioOutputImplementation, 1, 0);
 
     // -------------------------------------------------------------------------
@@ -81,7 +81,7 @@ namespace Plugin {
             LOGERR("UpdateCache: failed to get atmos metadata from HAL");
         }
 
-        Exchange::IAudioOutput::SoundModes mode = Exchange::IAudioOutput::UNKNOWN;
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
         if (SoundMode(mode) != Core::ERROR_NONE) {
             LOGERR("UpdateCache: failed to get sound mode from HAL");
         }
@@ -199,7 +199,7 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation::onAudioModeChanged: portType=%d, smode=%d",
                 static_cast<int>(portType), static_cast<int>(smode));
 
-        Exchange::IAudioOutput::SoundModes mode = Exchange::IAudioOutput::UNKNOWN;
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
        
         try {
             device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
@@ -335,7 +335,7 @@ namespace Plugin {
     // Copied from entservices-playerinfo/plugin/DeviceSettings/PlatformImplementation.cpp
     // -------------------------------------------------------------------------
 
-    static Exchange::IAudioOutput::SoundModes DsAudioModeToSoundMode(
+    static Exchange::IAudioOutput::AudioModes DsAudioModeToSoundMode(
         const device::AudioStereoMode& smode)
     {
         if (smode == device::AudioStereoMode::kMono)     return Exchange::IAudioOutput::MONO;
@@ -348,7 +348,7 @@ namespace Plugin {
         return Exchange::IAudioOutput::UNKNOWN;
     }
 
-    uint32_t AudioOutputImplementation::SoundMode(Exchange::IAudioOutput::SoundModes& mode) const
+    uint32_t AudioOutputImplementation::SoundMode(Exchange::IAudioOutput::AudioModes& mode) const
     {
 	    mode = Exchange::IAudioOutput::UNKNOWN;
         std::vector<std::string> hdmiArcPorts, hdmiPorts, speakerPorts, spdifPorts, headphonePorts;
