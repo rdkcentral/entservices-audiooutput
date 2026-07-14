@@ -100,8 +100,8 @@ namespace Plugin {
     void AudioOutputImplementation::registerDsEventHandlers()
     {
         if (!_registeredDsEventHandlers) {
-            _registeredDsEventHandlers = true;
             device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]");
+            _registeredDsEventHandlers = true;
             LOGINFO("Registered for IAudioOutputPortEvents");
         }
     }
