@@ -48,6 +48,7 @@ namespace WPEFramework {
             , _connectionId(0)
             , _audioOutput(nullptr)
             , _notification(this)
+            , _connectionNotification(this)
         {
             SYSLOG(Logging::Startup, (_T("AudioOutput Constructor")));
         }
@@ -70,6 +71,7 @@ namespace WPEFramework {
 
             _service = service;
             _service->AddRef();
+            _service->Register(&_connectionNotification);
 
             _audioOutput = _service->Root<Exchange::IAudioOutput>(_connectionId, 5000, _T("AudioOutputImplementation"));
 
@@ -84,8 +86,8 @@ namespace WPEFramework {
                     message = _T("AudioOutput implementation did not provide a configuration interface");
                 }
                 Exchange::JAudioOutput::Register(*this, _audioOutput);
-               _notification.Initialize(_audioOutput);
-               
+                _audioOutput->Register(&_notification);
+
             } else {
                 SYSLOG(Logging::Startup, (_T("AudioOutput::Initialize: Failed to initialise AudioOutput plugin")));
                 message = _T("AudioOutput plugin could not be initialised");
@@ -101,7 +103,7 @@ namespace WPEFramework {
             SYSLOG(Logging::Shutdown, (string(_T("AudioOutput::Deinitialize"))));
 
             if (nullptr != _audioOutput) {
-                _notification.Deinitialize();
+                _audioOutput->Unregister(&_notification);
                 Exchange::JAudioOutput::Unregister(*this);
 
                 if (_configure != nullptr) {
@@ -109,26 +111,14 @@ namespace WPEFramework {
                     _configure = nullptr;
                 }
 
-                RPC::IRemoteConnection* connection = service->RemoteConnection(_connectionId);
                 VARIABLE_IS_NOT_USED uint32_t result = _audioOutput->Release();
                 _audioOutput = nullptr;
 
                 ASSERT(result == Core::ERROR_DESTRUCTION_SUCCEEDED);
-
-                if (nullptr != connection) {
-                    try {
-                        connection->Terminate();
-                        LOGWARN("AudioOutput: Connection terminated successfully.");
-                    } catch (const std::exception& e) {
-                        std::string errorMessage = "AudioOutput: Failed to terminate connection: ";
-                        errorMessage += e.what();
-                        LOGWARN("%s", errorMessage.c_str());
-                    }
-                    connection->Release();
-                }
             }
 
             _connectionId = 0;
+	        _service->Unregister(&_connectionNotification);
             _service->Release();
             _service = nullptr;
 
