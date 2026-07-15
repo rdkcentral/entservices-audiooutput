@@ -26,7 +26,7 @@ set(PLUGIN_AUDIOOUTPUT_STARTUPORDER "" CACHE STRING "Startup order for AudioOutp
 find_package(${NAMESPACE}Plugins REQUIRED)
 find_package(${NAMESPACE}Definitions REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
-find_package(DS)
+find_package(DS REQUIRED)
 find_package(${NAMESPACE}Helpers REQUIRED)
 
 # ----------------------------------------------------------------
