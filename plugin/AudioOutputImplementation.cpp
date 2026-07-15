@@ -19,6 +19,8 @@
 
 #include "AudioOutputImplementation.h"
 
+#include <algorithm>
+#include <vector>
 #include <core/core.h>
 #include "UtilsLogging.h"
 
@@ -86,8 +88,10 @@ namespace Plugin {
             LOGERR("UpdateCache: failed to get sound mode from HAL");
         }
 
+        _adminLock.Lock();
         _atmosMetaData = cap;
         _soundMode = mode;
+        _adminLock.Unlock();
         UpdateCache();
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
@@ -98,8 +102,8 @@ namespace Plugin {
     void AudioOutputImplementation::registerDsEventHandlers()
     {
         if (!_registeredDsEventHandlers) {
-            _registeredDsEventHandlers = true;
             device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]");
+            _registeredDsEventHandlers = true;
             LOGINFO("Registered for IAudioOutputPortEvents");
         }
     }
@@ -107,8 +111,8 @@ namespace Plugin {
     void AudioOutputImplementation::unregisterDsEventHandlers()
     {
         if (_registeredDsEventHandlers) {
-            _registeredDsEventHandlers = false;
             device::Host::getInstance().UnRegister(&_dsAudioPortNotification);
+			_registeredDsEventHandlers = false;
             LOGINFO("Unregistered from IAudioOutputPortEvents");
         }
     }
@@ -237,11 +241,7 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: atmosCapability=%d, status=%d",
                 atmosCapability, static_cast<int>(status));
                 
-       if (!status) {
-            LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: Ignoring event..");
-	    return;
-       }
-       	_adminLock.Lock();
+     	_adminLock.Lock();
         _atmosMetaData = (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
         _adminLock.Unlock();
 
@@ -254,16 +254,22 @@ namespace Plugin {
 
     void AudioOutputImplementation::SendNotify(bool dolbyAtmosExperience)
     {
+        std::list<Exchange::IAudioOutput::INotification*> index;
+
         _adminLock.Lock();
-        std::list<Exchange::IAudioOutput::INotification*> index(_observers);
+        index = _observers;
+        for (auto* obs : index) {
+            obs->AddRef();
+        }
+        _adminLock.Unlock();
 
         LOGINFO("AudioOutputImplementation: SendNotify: notifying %zu observers of dolbyAtmosExperience=%s",
                 index.size(), dolbyAtmosExperience ? "true" : "false");
-        for (auto* itr : index) {
-            itr->OnDolbyAtmosExperienceChanged(dolbyAtmosExperience);
-        }
 
-        _adminLock.Unlock();
+        for (auto* obs : index) {
+            obs->OnDolbyAtmosExperienceChanged(dolbyAtmosExperience);
+            obs->Release();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -274,9 +280,9 @@ namespace Plugin {
 
     bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
     {
-      //  if (!_atmosMetaData) {
-        //    return false;
-       // }
+        if (!_atmosMetaData) {
+            return false;
+        }
 
         switch (_soundMode) {
         case Exchange::IAudioOutput::PASSTHRU:
