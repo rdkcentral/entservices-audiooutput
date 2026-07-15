@@ -1,0 +1,12 @@
+precondition = ["Platform"]
+callsign = "org.rdk.AudioOutput"
+autostart = "@PLUGIN_AUDIOOUTPUT_AUTOSTART@"
+startuporder = "@PLUGIN_AUDIOOUTPUT_STARTUPORDER@"
+
+configuration = JSON()
+rootobject = JSON()
+
+rootobject.add("mode", "@PLUGIN_AUDIOOUTPUT_MODE@")
+rootobject.add("locator", "lib@PLUGIN_IMPLEMENTATION@.so")
+
+configuration.add("root", rootobject)
