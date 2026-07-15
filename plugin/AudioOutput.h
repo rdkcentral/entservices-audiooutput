@@ -41,29 +41,10 @@ namespace Plugin {
 
             explicit Notification(AudioOutput* parent)
                 : _parent(*parent)
-                , _client(nullptr)
             {
                 ASSERT(parent != nullptr);
             }
             ~Notification() override = default;
-
-            void Initialize(Exchange::IAudioOutput* client)
-            {
-                ASSERT(client != nullptr);
-                _client = client;
-                _client->AddRef();
-                _client->Register(this);
-            }
-
-            void Deinitialize()
-            {
-                ASSERT(_client != nullptr);
-                if (_client != nullptr) {
-                    _client->Unregister(this);
-                    _client->Release();
-                    _client = nullptr;
-                }
-            }
 
             void OnDolbyAtmosExperienceChanged(const bool dolbyAtmosExperience) override
             {
@@ -78,7 +59,34 @@ namespace Plugin {
 
         private:
             AudioOutput& _parent;
-            Exchange::IAudioOutput* _client;
+        };
+
+        class ConnectionNotification : public RPC::IRemoteConnection::INotification {
+        public:
+            ConnectionNotification() = delete;
+            ConnectionNotification(const ConnectionNotification&) = delete;
+            ConnectionNotification& operator=(const ConnectionNotification&) = delete;
+
+            explicit ConnectionNotification(AudioOutput* parent)
+                : _parent(*parent)
+            {
+                ASSERT(parent != nullptr);
+            }
+            ~ConnectionNotification() override = default;
+
+            void Activated(RPC::IRemoteConnection*) override {}
+
+            void Deactivated(RPC::IRemoteConnection* connection) override
+            {
+                _parent.Deactivated(connection);
+            }
+
+            BEGIN_INTERFACE_MAP(ConnectionNotification)
+            INTERFACE_ENTRY(RPC::IRemoteConnection::INotification)
+            END_INTERFACE_MAP
+
+        private:
+            AudioOutput& _parent;
         };
 
     public:
@@ -108,6 +116,7 @@ namespace Plugin {
         Exchange::IAudioOutput* _audioOutput{};
         Exchange::IConfiguration* _configure{};
         Core::Sink<Notification> _notification;
+        Core::Sink<ConnectionNotification> _connectionNotification;
     };
 
 } // namespace Plugin
