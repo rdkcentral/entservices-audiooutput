@@ -60,7 +60,7 @@ git clone --branch 1.0.14 https://github.com/rdkcentral/entservices-testframewor
 ############################
 # Build Thunder-Tools
 echo "======================================================================================"
-echo "buliding thunderTools"
+echo "building thunderTools"
 cd ThunderTools
 patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/00010-R4.4-Add-support-for-project-dir.patch
 cd -
@@ -104,7 +104,7 @@ cmake --build build/Thunder --target install
 ############################
 # Build entservices-apis
 echo "======================================================================================"
-echo "buliding entservices-apis"
+echo "building entservices-apis"
 cd entservices-apis
 rm -rf jsonrpc/DTV.json
 patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/RDKEMW-1007.patch
