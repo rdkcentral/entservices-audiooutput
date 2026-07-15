@@ -71,7 +71,7 @@ namespace WPEFramework {
 
             _service = service;
             _service->AddRef();
-_service->Register(&_connectionNotification);
+            _service->Register(&_connectionNotification);
 
             _audioOutput = _service->Root<Exchange::IAudioOutput>(_connectionId, 5000, _T("AudioOutputImplementation"));
 
