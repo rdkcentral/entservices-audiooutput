@@ -180,7 +180,7 @@ namespace Plugin {
 
         _adminLock.Lock();
 
-        auto itr = std::find(_observers.begin(), _observers.end(), notification);
+        auto itr = std::find(_observers.begin(), _observers.end(), const_cast<Exchange::IAudioOutput::INotification*>(notification));
         if (itr != _observers.end()) {
             (*itr)->Release();
             _observers.erase(itr);
