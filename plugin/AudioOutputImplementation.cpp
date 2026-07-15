@@ -213,7 +213,8 @@ namespace Plugin {
                 if ((typeId == portType) &&
                     (typeId == dsAUDIOPORT_TYPE_HDMI_ARC ||
                      typeId == dsAUDIOPORT_TYPE_SPDIF ||
-                     typeId == dsAUDIOPORT_TYPE_HDMI) && aPortObj.getStereoAuto()) {
+                     typeId == dsAUDIOPORT_TYPE_HDMI ||
+                     typeId == dsAUDIOPORT_TYPE_SPEAKER) && aPortObj.getStereoAuto()) {
                     mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                     break;
                 } else if (typeId == portType) {
@@ -402,7 +403,8 @@ namespace Plugin {
 
                     if ((aPort.getType().getId() == device::AudioOutputPortType::kARC ||
                          aPort.getType().getId() == device::AudioOutputPortType::kSPDIF ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI)
+                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI ||
+                         aPort.getType().getId() == device::AudioOutputPortType::kSPEAKER)
                             && aPort.getStereoAuto()) {
                         mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                         LOGINFO("setting audio mode as auto");
