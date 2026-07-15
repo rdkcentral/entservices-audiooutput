@@ -27,6 +27,7 @@
 #include <com/com.h>
 #include <core/core.h>
 #include <list>
+#include <string>
 
 #include "host.hpp"
 #include "dsAudio.h"
