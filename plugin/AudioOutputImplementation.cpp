@@ -79,14 +79,22 @@ namespace Plugin {
         ASSERT(service != nullptr);
 
         bool cap = false;
+        bool atmosMetadataFailed = false;
+
         if (AtmosMetadata(cap) != Core::ERROR_NONE) {
-            LOGERR("UpdateCache: failed to get atmos metadata from HAL");
+            LOGERR("Configure: failed to get atmos metadata");
+            atmosMetadataFailed = true;
         }
 
         Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+        bool soundModeInitFailed = false;
         if (SoundMode(mode) != Core::ERROR_NONE) {
-            LOGERR("UpdateCache: failed to get sound mode from HAL");
+            LOGERR("Configure: failed to get sound mode");
+            soundModeInitFailed = true;
         }
+
+        _atmosMetadataInitFailed = atmosMetadataFailed;
+        _soundModeInitFailed = soundModeInitFailed;
 
         _adminLock.Lock();
         _atmosMetaData = cap;
@@ -146,6 +154,35 @@ namespace Plugin {
 
     Core::hresult AudioOutputImplementation::DolbyAtmosExperience(bool& enabled) const
     {
+        if (_atmosMetadataInitFailed || _soundModeInitFailed) {
+            LOGINFO("DolbyAtmosExperience: prior init failure detected, retrying HAL queries");
+
+            bool cap = false;
+            bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
+
+            Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+            bool soundErr = (SoundMode(mode) != Core::ERROR_NONE);
+
+            if (atmosErr || soundErr) {
+                LOGERR("DolbyAtmosExperience: retry failed (atmosMetadata=%s, soundMode=%s)",
+                       atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
+                return Core::ERROR_GENERAL;
+            }
+
+            _atmosMetadataInitFailed = false;
+            _soundModeInitFailed = false;
+
+            _adminLock.Lock();
+            _atmosMetaData = cap;
+            _soundMode = mode;
+            _adminLock.Unlock();
+
+            const_cast<AudioOutputImplementation*>(this)->UpdateCache();
+
+            LOGINFO("DolbyAtmosExperience: retry succeeded (atmosMetadata=%s, soundMode=%d)",
+                    cap ? "true" : "false", mode);
+        }
+
         _adminLock.Lock();
         enabled = _dolbyAtmosExperience;
         _adminLock.Unlock();
@@ -329,12 +366,12 @@ namespace Plugin {
         catch(const device::Exception& err)
         {
             TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
+            return Core::ERROR_GENERAL;
         }
 
-        if(atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA) supported = true;
+        if (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA) supported = true;
 
-
-        return (Core::ERROR_NONE);
+        return Core::ERROR_NONE;
     }
 
     // -------------------------------------------------------------------------
@@ -418,6 +455,7 @@ namespace Plugin {
             }
         } catch (const device::Exception& err) {
             TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
+            return Core::ERROR_GENERAL;
         }
 
 	return Core::ERROR_NONE;

@@ -26,6 +26,7 @@
 
 #include <com/com.h>
 #include <core/core.h>
+#include <atomic>
 #include <list>
 #include <string>
 
@@ -113,9 +114,13 @@ namespace Plugin {
         mutable Core::CriticalSection _adminLock;
 
         // Cached values
-        bool _atmosMetaData{false};
-        Exchange::IAudioOutput::AudioModes _soundMode{Exchange::IAudioOutput::UNKNOWN};
+        mutable bool _atmosMetaData{false};
+        mutable Exchange::IAudioOutput::AudioModes _soundMode{Exchange::IAudioOutput::UNKNOWN};
         bool _dolbyAtmosExperience{false};
+
+        // Init failure flags — atomic so they need no lock
+        mutable std::atomic<bool> _atmosMetadataInitFailed{false};
+        mutable std::atomic<bool> _soundModeInitFailed{false};
 
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
