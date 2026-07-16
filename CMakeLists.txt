@@ -19,7 +19,9 @@
 
 cmake_minimum_required(VERSION 3.3)
 
-find_package(WPEFramework REQUIRED)
+project(entservices-audiooutput)
+
+find_package(WPEFramework)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
 
@@ -33,14 +35,6 @@ endif()
 string(TOLOWER ${NAMESPACE} STORAGE_DIRECTORY)
 
 include(CmakeHelperFunctions OPTIONAL)
-
-if(RDK_SERVICE_L2_TEST)
-    add_subdirectory(Tests/L2Tests)
-endif()
-
-if(RDK_SERVICES_L1_TEST)
-    add_subdirectory(Tests/L1Tests)
-endif()
 
 option(PLUGIN_AUDIOOUTPUT "Include AudioOutput plugin" OFF)
 
