@@ -58,6 +58,27 @@ cd "$GITHUB_WORKSPACE"
 git clone --branch 1.0.14 https://github.com/rdkcentral/entservices-testframework.git
 
 ############################
+# Patch devicesettings.h: add virtual destructor to IAudioOutputPortEvents so
+# that plugin subclasses can use '~Foo() override = default;' without error.
+python3 - <<'PYEOF'
+import re, sys
+path = "entservices-testframework/Tests/mocks/devicesettings.h"
+with open(path, "r") as f:
+    content = f.read()
+if "virtual ~IAudioOutputPortEvents()" not in content:
+    content = re.sub(
+        r"(class\s+IAudioOutputPortEvents\s*\{)",
+        r"\1\n    public:\n        virtual ~IAudioOutputPortEvents() = default;",
+        content
+    )
+    with open(path, "w") as f:
+        f.write(content)
+    print("Patched: added virtual ~IAudioOutputPortEvents() to devicesettings.h")
+else:
+    print("Skip: virtual ~IAudioOutputPortEvents() already present")
+PYEOF
+
+############################
 # Build Thunder-Tools
 echo "======================================================================================"
 echo "building thunderTools"
