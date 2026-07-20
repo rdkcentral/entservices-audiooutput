@@ -92,7 +92,8 @@ jobs:
           cmake-version: '3.16.x'
 
       # L2 adds libsqlite3-dev, libcurl4-openssl-dev for Thunder runtime.
-      # libcunit1/libcunit1-dev required by trower-base64 meson build.
+      # libcunit1/libcunit1-dev: trower-base64 meson build
+      # libdrm-dev: devicesettings.h -> xf86drmMode.h -> drm.h
       # Intentionally omits: libboost, libwebsocketpp, protobuf, grpc (not needed)
       - name: Install packages
         run: >
@@ -110,6 +111,7 @@ jobs:
           libcunit1-dev
           libsqlite3-dev
           libcurl4-openssl-dev
+          libdrm-dev
           libgstreamer1.0-dev
           libgstreamer-plugins-base1.0-dev
 
@@ -344,12 +346,17 @@ jobs:
           btmgr.h
           systemaudioplatform.h
           essos-resmgr.h
+          drm.h
+          drm_mode.h
           &&
           cp -r
           /usr/include/gstreamer-1.0/gst
           /usr/include/glib-2.0/*
           /usr/lib/x86_64-linux-gnu/glib-2.0/include/*
           /usr/local/include/trower-base64/base64.h
+          /usr/include/libdrm/drm.h
+          /usr/include/libdrm/drm_mode.h
+          /usr/include/xf86drm.h
           .
 
       - name: Set clang toolchain

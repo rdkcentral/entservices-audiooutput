@@ -98,8 +98,9 @@ jobs:
           cmake-version: '3.16.x'
 
       # audiooutput only needs DS HAL, no sqlite/websocket/grpc/boost
-      # libcunit1/libcunit1-dev required by trower-base64 meson build
-      # libcurl4-openssl-dev required by entservices-helpers (utils.cpp includes curl/curl.h)
+      # libcunit1/libcunit1-dev: trower-base64 meson build
+      # libcurl4-openssl-dev: entservices-helpers utils.cpp includes curl/curl.h
+      # libdrm-dev: devicesettings.h -> xf86drmMode.h -> drm.h
       - name: Install packages
         run: >
           sudo apt update
@@ -115,6 +116,7 @@ jobs:
           libcunit1
           libcunit1-dev
           libcurl4-openssl-dev
+          libdrm-dev
           libgstreamer1.0-dev
           libgstreamer-plugins-base1.0-dev
 
@@ -336,6 +338,8 @@ jobs:
           libudev.h
           rfcapi.h
           rbus.h
+          drm.h
+          drm_mode.h
           telemetry_busmessage_sender.h
           maintenanceMGR.h
           pkg.h
@@ -347,6 +351,9 @@ jobs:
           /usr/include/glib-2.0/*
           /usr/lib/x86_64-linux-gnu/glib-2.0/include/*
           /usr/local/include/trower-base64/base64.h
+          /usr/include/libdrm/drm.h
+          /usr/include/libdrm/drm_mode.h
+          /usr/include/xf86drm.h
           .
 
       # Select toolchain file based on matrix (clang, gcc+coverage, gcc+no-coverage)
@@ -395,14 +402,17 @@ jobs:
           &&
           cmake --install build/entservices-helpers
 
-      # Build the devicesettings mock shared library (TestMocklib).
-      # Only DS-HAL and audiooutput-relevant mocks — no btmgr, tr181, tvSettings etc.
+      # Build the mock shared library (TestMocklib) for L1 tests.
+      # -DL2_TEST_OOP_RPC=ON selects the MockAccessor/OOP-RPC branch in
+      # mocks/CMakeLists.txt, which avoids find_package(Protobuf REQUIRED)
+      # (audiooutput does not use SecureStorage/gRPC).
       - name: Build mocks
         run: >
           cmake -G Ninja
           -S "$GITHUB_WORKSPACE/entservices-testframework/Tests/mocks"
           -B build/mocks
           -DBUILD_SHARED_LIBS=ON
+          -DL2_TEST_OOP_RPC=ON
           -DRDK_SERVICES_L1_TEST=ON
           -DUSE_THUNDER_R4=ON
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
@@ -428,7 +438,6 @@ jobs:
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests
           -I$GITHUB_WORKSPACE/entservices-helpers/helpers
           -I$GITHUB_WORKSPACE/install/usr/include
-          -I./usr/include/libdrm
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/devicesettings.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
