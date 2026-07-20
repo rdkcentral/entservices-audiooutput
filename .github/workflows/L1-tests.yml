@@ -99,6 +99,7 @@ jobs:
 
       # audiooutput only needs DS HAL, no sqlite/websocket/grpc/boost
       # libcunit1/libcunit1-dev required by trower-base64 meson build
+      # libcurl4-openssl-dev required by entservices-helpers (utils.cpp includes curl/curl.h)
       - name: Install packages
         run: >
           sudo apt update
@@ -113,6 +114,7 @@ jobs:
           curl
           libcunit1
           libcunit1-dev
+          libcurl4-openssl-dev
           libgstreamer1.0-dev
           libgstreamer-plugins-base1.0-dev
 
