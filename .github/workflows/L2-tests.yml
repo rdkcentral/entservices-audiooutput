@@ -377,14 +377,16 @@ jobs:
           &&
           cmake --install build/googletest
 
-      # Build mock shared library (TestMocklib + MockAccessor) for L2 tests.
-      # -DRDK_SERVICE_L2_TEST=ON enables the L2 mock configuration.
+      # Build mock shared library (MockAccessor) for L2 tests.
+      # -DL2_TEST_OOP_RPC=ON selects the MockAccessor branch in mocks/CMakeLists.txt
+      # (avoids the else-branch which requires Protobuf + gRPC).
       - name: Build mocks
         run: >
           cmake -G Ninja
           -S "$GITHUB_WORKSPACE/entservices-testframework/Tests/mocks"
           -B build/mocks
           -DBUILD_SHARED_LIBS=ON
+          -DL2_TEST_OOP_RPC=ON
           -DRDK_SERVICE_L2_TEST=ON
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
