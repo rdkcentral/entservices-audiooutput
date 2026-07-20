@@ -85,5 +85,3 @@ target_link_libraries(${MODULE_NAME}
 target_compile_definitions(${MODULE_NAME} PRIVATE UNIT_TEST)
 
 install(TARGETS ${MODULE_NAME} DESTINATION lib)
-
-write_config(${PLUGIN_NAME})

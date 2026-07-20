@@ -311,7 +311,7 @@ jobs:
           rdk/ds/audioOutputPort.hpp
           rdk/ds/audioOutputPortType.hpp
           rdk/ds/audioOutputPortConfig.hpp
-          rdk/ds/audioStereoMode.hpp
+          rdk/ds/AudioStereoMode.hpp
           rdk/ds/dsAudio.h
           rdk/ds/dsError.h
           rdk/ds/dsMgr.h
@@ -527,6 +527,30 @@ jobs:
           cmake --build build/entservices-audiooutput -j8
           &&
           cmake --install build/entservices-audiooutput
+
+      # Patch testframework's L1Tests/CMakeLists.txt to link our test library
+      # into RdkServicesL1Test. The testframework v1.0.14 has no PLUGIN_AUDIOOUTPUT
+      # handler — without this patch, zero tests run and no .gcda files are generated.
+      - name: Patch testframework for audiooutput
+        run: |
+          python3 - <<'PYEOF'
+          path = "entservices-testframework/Tests/L1Tests/CMakeLists.txt"
+          with open(path, "r") as f:
+              content = f.read()
+          if "PLUGIN_AUDIOOUTPUT" not in content:
+              insert = (
+                  "\nif(PLUGIN_AUDIOOUTPUT)\n"
+                  "    message(STATUS \"linking libWPEFrameworkL1TestsAudioOutput to RdkServicesL1Test\")\n"
+                  "    target_link_libraries(${PROJECT_NAME} \"${ENTSERVICES_REPO_L1TEST_LIB_PATH}/libWPEFrameworkL1TestsAudioOutput.so\")\n"
+                  "endif()\n"
+              )
+              content = content.replace("include(GoogleTest)", insert + "include(GoogleTest)")
+              with open(path, "w") as f:
+                  f.write(content)
+              print("Patched: added PLUGIN_AUDIOOUTPUT handler to testframework CMakeLists.txt")
+          else:
+              print("Skip: PLUGIN_AUDIOOUTPUT already present")
+          PYEOF
 
       # Build the L1 test runner (RdkServicesL1Test executable)
       - name: Build entservices-testframework
