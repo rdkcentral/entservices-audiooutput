@@ -414,8 +414,10 @@ jobs:
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/ccec/drivers
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/network
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests
+          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/mocks
           -I$GITHUB_WORKSPACE/entservices-helpers/helpers
-          -I$GITHUB_WORKSPACE/install/usr/include"
+          -I$GITHUB_WORKSPACE/install/usr/include
+          -I$GITHUB_WORKSPACE/install/usr/include/WPEFramework"
           &&
           cmake --build build/mocks -j8
           &&
