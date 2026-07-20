@@ -92,6 +92,7 @@ jobs:
           cmake-version: '3.16.x'
 
       # L2 adds libsqlite3-dev, libcurl4-openssl-dev for Thunder runtime.
+      # libcunit1/libcunit1-dev required by trower-base64 meson build.
       # Intentionally omits: libboost, libwebsocketpp, protobuf, grpc (not needed)
       - name: Install packages
         run: >
@@ -105,6 +106,8 @@ jobs:
           libunwind-dev
           meson
           curl
+          libcunit1
+          libcunit1-dev
           libsqlite3-dev
           libcurl4-openssl-dev
           libgstreamer1.0-dev

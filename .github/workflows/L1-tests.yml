@@ -98,6 +98,7 @@ jobs:
           cmake-version: '3.16.x'
 
       # audiooutput only needs DS HAL, no sqlite/websocket/grpc/boost
+      # libcunit1/libcunit1-dev required by trower-base64 meson build
       - name: Install packages
         run: >
           sudo apt update
@@ -110,6 +111,8 @@ jobs:
           libunwind-dev
           meson
           curl
+          libcunit1
+          libcunit1-dev
           libgstreamer1.0-dev
           libgstreamer-plugins-base1.0-dev
 
