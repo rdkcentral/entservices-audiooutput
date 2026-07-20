@@ -19,6 +19,10 @@
 
 #include "AudioOutput.h"
 
+#ifdef DS_COMRPC
+#include <interfaces/IConfiguration.h>
+#endif
+
 #define API_VERSION_NUMBER_MAJOR 1
 #define API_VERSION_NUMBER_MINOR 0
 #define API_VERSION_NUMBER_PATCH 0
@@ -76,6 +80,21 @@ namespace WPEFramework {
             _audioOutput = _service->Root<Exchange::IAudioOutput>(_connectionId, 5000, _T("AudioOutputImplementation"));
 
             if (nullptr != _audioOutput) {
+#ifdef DS_COMRPC
+                // DS_COMRPC: Provide IShell* to the implementation so it can open
+                // the DSHelper link to entservices-devicesettings (same pattern as
+                // PlayerInfo USE_DEVICESETTING_PLUGIN in PlayerInfo.cpp).
+                {
+                    Exchange::IConfiguration* config =
+                        _audioOutput->QueryInterface<Exchange::IConfiguration>();
+                    if (config != nullptr) {
+                        config->Configure(service);
+                        config->Release();
+                    } else {
+                        SYSLOG(Logging::Error, (_T("AudioOutput::Initialize: IConfiguration not implemented by AudioOutputImplementation")));
+                    }
+                }
+#else
                 _configure = _audioOutput->QueryInterface<Exchange::IConfiguration>();
                 if (_configure != nullptr) {
                     uint32_t result = _configure->Configure(service);
@@ -85,6 +104,7 @@ namespace WPEFramework {
                 } else {
                     message = _T("AudioOutput implementation did not provide a configuration interface");
                 }
+#endif
                 Exchange::JAudioOutput::Register(*this, _audioOutput);
                 _audioOutput->Register(&_notification);
 
@@ -106,10 +126,12 @@ namespace WPEFramework {
                 _audioOutput->Unregister(&_notification);
                 Exchange::JAudioOutput::Unregister(*this);
 
+#ifndef DS_COMRPC
                 if (_configure != nullptr) {
                     _configure->Release();
                     _configure = nullptr;
                 }
+#endif
 
                 VARIABLE_IS_NOT_USED uint32_t result = _audioOutput->Release();
                 _audioOutput = nullptr;
