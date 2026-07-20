@@ -231,14 +231,14 @@ TEST_F(AudioOutputImplementationTest, NotSupportedCapability_AllSoundModes_Retur
         {dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_DDPLUS},
     };
 
-    for (auto& [pt, sm] : modes) {
-        TriggerSoundModeChange(pt, sm);
+    for (auto& mode : modes) {
+        TriggerSoundModeChange(mode.first, mode.second);
 
         bool enabled = true;
         EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
         EXPECT_FALSE(enabled)
             << "_atmosMetaData=false → false regardless of sound mode="
-            << static_cast<int>(sm);
+            << static_cast<int>(mode.second);
     }
 }
 
