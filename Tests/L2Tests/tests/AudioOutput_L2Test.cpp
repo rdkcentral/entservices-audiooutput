@@ -212,7 +212,7 @@ AudioOutputL2Test::AudioOutputL2Test()
 
     // dsListener must be valid — populated by the plugin's constructor call
     // to device::Host::getInstance().Register(&_dsAudioPortNotification, ...)
-    ASSERT_NE(dsListener, nullptr)
+    EXPECT_NE(dsListener, nullptr)
         << "Plugin did not call Host::Register in constructor";
 }
 
