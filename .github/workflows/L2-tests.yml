@@ -307,6 +307,7 @@ jobs:
           rdk/ds/audioOutputPort.hpp
           rdk/ds/audioOutputPortType.hpp
           rdk/ds/audioOutputPortConfig.hpp
+          rdk/ds/audioStereoMode.hpp
           rdk/ds/AudioStereoMode.hpp
           rdk/ds/VideoDFC.hpp
           rdk/ds/dsAudio.h
