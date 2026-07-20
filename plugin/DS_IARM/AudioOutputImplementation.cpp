@@ -415,7 +415,7 @@ namespace Plugin {
                         headphonePorts.push_back(aPort.getName());
                 }
             }
-
+            
 	    // Strict precedence: HDMI_ARC > HDMI > SPEAKER > SPDIF > HEADPHONE
             // first enumerated port is intentionally selected if multiple exist.
             std::string selectedPort;
