@@ -252,11 +252,9 @@ AudioOutputL2Test::~AudioOutputL2Test()
 
 uint32_t AudioOutputL2Test::CreateAudioOutputInterfaceObjectUsingComRPCConnection()
 {
-    Core::SystemInfo::SetEnvironment(_T("THUNDER_ACCESS"), _T("127.0.0.1:9998"));
-
     mAudioOutputEngine = Core::ProxyType<RPC::InvokeServerType<1, 0, 4>>::Create();
     mAudioOutputClient = Core::ProxyType<RPC::CommunicatorClient>::Create(
-        Core::NodeId(_T("127.0.0.1:9998")),
+        Core::NodeId(_T("/tmp/communicator")),
         Core::ProxyType<Core::IIPCServer>(mAudioOutputEngine));
 
     if (!mAudioOutputClient.IsValid()) {
@@ -264,8 +262,16 @@ uint32_t AudioOutputL2Test::CreateAudioOutputInterfaceObjectUsingComRPCConnectio
         return Core::ERROR_GENERAL;
     }
 
-    mAudioOutputPlugin = mAudioOutputClient->Open<Exchange::IAudioOutput>(
+    PluginHost::IShell* shell = mAudioOutputClient->Open<PluginHost::IShell>(
         AUDIOOUTPUT_CALLSIGN, ~0, 3000);
+
+    if (shell == nullptr) {
+        TEST_LOG("Failed to acquire IShell interface");
+        return Core::ERROR_GENERAL;
+    }
+
+    mAudioOutputPlugin = shell->QueryInterface<Exchange::IAudioOutput>();
+    shell->Release();
 
     if (mAudioOutputPlugin != nullptr) {
         TEST_LOG("Successfully acquired IAudioOutput interface via COM-RPC");
