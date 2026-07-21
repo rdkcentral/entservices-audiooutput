@@ -617,12 +617,20 @@ jobs:
       # can be activated without a Platform subsystem provider (e.g., PowerManager).
       # In a production system the precondition is satisfied by the PowerManager
       # plugin, but that plugin is not built/installed in this CI test environment.
+      # Fix AudioOutput.json: remove Platform precondition (not satisfied in CI)
+      # and correct classname from cmake PROJECT_NAME ("entservices-audiooutput")
+      # to the actual C++ class name ("AudioOutput") registered by
+      # SERVICE_REGISTRATION(AudioOutput, ...) in AudioOutput.cpp.
+      # write_config() in ThunderTools defaults classname to ${PROJECT_NAME}
+      # when no explicit CLASSNAME is given; the plugin CMakeLists.txt inherits
+      # the top-level project name "entservices-audiooutput", so the generated
+      # JSON has the wrong classname.
       - name: Remove Platform precondition from AudioOutput plugin config
         run: |
           find $GITHUB_WORKSPACE/install -name "AudioOutput.json" | while read F; do
             tmp=$(mktemp)
-            jq 'del(.precondition)' "$F" > "$tmp" && mv "$tmp" "$F"
-            echo "Removed precondition from $F"
+            jq 'del(.precondition) | .classname = "AudioOutput"' "$F" > "$tmp" && mv "$tmp" "$F"
+            echo "Fixed classname and removed precondition from $F"
           done
           find $GITHUB_WORKSPACE/install -name "AudioOutput.json" -exec echo "=== {} ===" \; -exec cat {} \; || true
 
