@@ -667,7 +667,8 @@ TEST_F(AudioOutputImplementationTest, Configure_SoundMode_Exception_SetsInitFlag
     ON_CALL(hostImplMock, getAudioOutputPorts())
         .WillByDefault(Return(
             device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
-    // AtmosMetadata: getName="" (no HDMI_ARC) → HDMI0, getAudioOutputPort succeeds
+    // AtmosMetadata: getName="HDMI0" (no HDMI_ARC) → host getSinkDeviceAtmosCapability
+    ON_CALL(audioOutputPortMock, getName()).WillByDefault(ReturnRef(portName));
     ON_CALL(hostImplMock, getAudioOutputPort(_))
         .WillByDefault(ReturnRef(portObj));
     // isConnected=false for AtmosMetadata → host getSinkDeviceAtmosCapability

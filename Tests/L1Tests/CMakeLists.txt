@@ -30,7 +30,12 @@ find_package(${NAMESPACE}Plugins REQUIRED)
 #   entservices-audiooutput/Tests/L1Tests/)
 # ---------------------------------------------------------------------------
 set(PLUGIN_SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/../../plugin)
-set(TESTFRAMEWORK_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/../../../entservices-testframework)
+# TESTFRAMEWORK_DIR can be overridden via -DTESTFRAMEWORK_DIR=... on the cmake
+# command line (used by native/coverity builds where testframework is cloned
+# inside GITHUB_WORKSPACE rather than one level above it).
+if(NOT DEFINED TESTFRAMEWORK_DIR)
+    set(TESTFRAMEWORK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../entservices-testframework)
+endif()
 set(HELPERS_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/../../../entservices-helpers)
 
 # ---------------------------------------------------------------------------
