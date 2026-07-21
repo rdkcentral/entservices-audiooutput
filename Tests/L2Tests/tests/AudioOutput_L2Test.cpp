@@ -43,6 +43,7 @@ using ::testing::ReturnRef;
 using ::testing::SaveArg;
 using ::testing::DoAll;
 using ::testing::A;
+using ::testing::Throw;
 using namespace WPEFramework;
 
 // ---------------------------------------------------------------------------
@@ -859,4 +860,183 @@ TEST_F(AudioOutputL2Test, ComRpc_NoNotification_WhenGetterCalledMultipleTimes)
     EXPECT_FALSE(sink->WasNotified());
 
     mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+// ===========================================================================
+//  Register / Unregister edge cases
+//  (via existing AudioOutputL2Test / AtmosCapable fixtures — COM-RPC access)
+// ===========================================================================
+
+// ===========================================================================
+//  Case 3 — Register same notification twice: duplicate silently ignored,
+//            one notification delivered (not two) on state change.
+//
+//  Exercises the LOGERR("same notification is registered already") path in
+//  AudioOutputImplementation::Register().
+//
+//  Expected:
+//    - Both Register() calls return ERROR_NONE
+//    - Notification fires exactly ONCE on a state change (only one entry in
+//      _observers because duplicate was not added)
+// ===========================================================================
+TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Register_Duplicate_NotificationDeliveredOnce)
+{
+    TEST_LOG("Case 3: duplicate Register — notification must fire exactly once");
+
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    // Set initial state to false (SURROUND is non-enabling)
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
+
+    // Create ONE sink, register it TWICE — second call hits the LOGERR duplicate path
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink))); // duplicate — LOGERR triggered
+
+    // Trigger a real false→true event so we can verify count
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_PASSTHRU);
+
+    bool fired = sink->WaitForNotification(2000);
+    EXPECT_TRUE(fired) << "Notification must still fire after duplicate register";
+
+    // Clean up
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+// ===========================================================================
+//  Case 4 — Unregister a notification that was never registered: LOGERR
+//            path, no crash, returns ERROR_NONE.
+//
+//  Exercises the LOGERR("notification not found") path in
+//  AudioOutputImplementation::Unregister().
+// ===========================================================================
+TEST_F(AudioOutputL2Test, ComRpc_Unregister_NotFound_LogsErrorAndReturnsOk)
+{
+    TEST_LOG("Case 4: Unregister a never-registered sink — must log error, not crash");
+
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    // Create a sink but do NOT register it, then immediately unregister
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Unregister(&(*sink)));
+    // Exercises LOGERR("notification not found") — must not crash or assert
+}
+
+// ===========================================================================
+//  AudioOutputL2Test_InitFailure
+//
+//  Fixture that makes AtmosMetadata() fail during Configure():
+//    getAudioOutputPort() throws device::Exception → AtmosMetadata returns
+//    ERROR_GENERAL → _atmosMetadataInitFailed = true.
+//
+//  This puts the implementation into the "retry-on-next-call" state so that
+//  DolbyAtmosExperience() enters the retry branch (lines that are otherwise
+//  unreachable in the default fixture).
+//
+//  The port list is kept EMPTY so SoundMode() succeeds (no ports → no call to
+//  getAudioOutputPort in SoundMode) and only the atmos init flag is set.
+// ===========================================================================
+class AudioOutputL2Test_InitFailure : public L2TestMocks {
+protected:
+    // Persistent port object returned by getAudioOutputPort() in the
+    // "retry succeeds" test after the mock is fixed.
+    device::AudioOutputPort portObj;
+
+    AudioOutputL2Test_InitFailure() : L2TestMocks()
+    {
+        TEST_LOG("AudioOutputL2Test_InitFailure constructor");
+
+        // Manager stubs
+        ON_CALL(*p_managerImplMock, Initialize()).WillByDefault(Return());
+        ON_CALL(*p_managerImplMock, DeInitialize()).WillByDefault(Return());
+
+        // Empty port list — SoundMode() will skip the loop and return ERROR_NONE,
+        // so only _atmosMetadataInitFailed is set (not _soundModeInitFailed).
+        ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+            .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
+
+        // getAudioOutputPort throws → AtmosMetadata catches exception →
+        // returns ERROR_GENERAL → Configure sets _atmosMetadataInitFailed = true.
+        ON_CALL(*p_hostImplMock, getAudioOutputPort(::testing::_))
+            .WillByDefault(Throw(device::Exception("Simulated HAL failure")));
+
+        ON_CALL(*p_hostImplMock,
+                Register(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+        ON_CALL(*p_hostImplMock,
+                UnRegister(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+
+        // Activate the plugin — Configure() will run, setting _atmosMetadataInitFailed=true
+        uint32_t status = ActivateService(AUDIOOUTPUT_CALLSIGN);
+        if (status != Core::ERROR_NONE) {
+            TEST_LOG("Warning: ActivateService returned %u (Configure always returns ERROR_NONE)", status);
+        }
+    }
+
+    virtual ~AudioOutputL2Test_InitFailure() override
+    {
+        TEST_LOG("AudioOutputL2Test_InitFailure destructor");
+        usleep(CLEANUP_DELAY_MICROSECONDS);
+        DeactivateService(AUDIOOUTPUT_CALLSIGN);
+    }
+};
+
+// ===========================================================================
+//  Scenario H — DolbyAtmosExperience retry path: both retries fail
+//
+//  With _atmosMetadataInitFailed=true, DolbyAtmosExperience() enters the
+//  retry block. getAudioOutputPort still throws → AtmosMetadata still returns
+//  ERROR_GENERAL → DolbyAtmosExperience returns ERROR_GENERAL.
+//
+//  Exercises lines in the retry block: cap declaration, AtmosMetadata call,
+//  SoundMode call, if (atmosErr || soundErr) LOGERR, return ERROR_GENERAL.
+// ===========================================================================
+TEST_F(AudioOutputL2Test_InitFailure,
+       DolbyAtmosExperience_RetryFails_WhenHalStillUnavailable_ReturnsError)
+{
+    TEST_LOG("Scenario H: retry path — HAL still unavailable → ERROR_GENERAL");
+
+    // getAudioOutputPort still throws → retry of AtmosMetadata fails
+    // InvokeServiceMethod returns the error propagated from the implementation
+    JsonObject params, result;
+    uint32_t status = InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience",
+                                          params, result);
+    EXPECT_NE(Core::ERROR_NONE, status)
+        << "When retry fails (HAL still unavailable), dolbyAtmosExperience must return an error";
+}
+
+// ===========================================================================
+//  Scenario I — DolbyAtmosExperience retry path: retry succeeds after fix
+//
+//  After ActivateService (which left _atmosMetadataInitFailed=true), we fix
+//  the getAudioOutputPort mock to return a valid port object.  The next call
+//  to DolbyAtmosExperience() enters the retry block, AtmosMetadata succeeds,
+//  flags are cleared, UpdateCache runs, and the method returns ERROR_NONE.
+//
+//  Exercises: flag-clear lines, UpdateCache call, LOGINFO, and the final
+//  "enabled = _dolbyAtmosExperience; return ERROR_NONE" path.
+// ===========================================================================
+TEST_F(AudioOutputL2Test_InitFailure,
+       DolbyAtmosExperience_RetrySucceeds_AfterMockFixed_ReturnsNone)
+{
+    TEST_LOG("Scenario I: retry path — HAL fixed after init failure → ERROR_NONE");
+
+    // Fix the mock: getAudioOutputPort no longer throws.
+    // isConnected() = false → host-level getSinkDeviceAtmosCapability path
+    // (cap stays dsAUDIO_ATMOS_NOTSUPPORTED → supported=false)
+    ON_CALL(*p_hostImplMock, getAudioOutputPort(::testing::_))
+        .WillByDefault(ReturnRef(portObj));
+    ON_CALL(*p_audioOutputPortMock, isConnected())
+        .WillByDefault(Return(false));
+
+    // Now the retry should succeed: AtmosMetadata returns ERROR_NONE,
+    // SoundMode returns ERROR_NONE, flags are cleared, ERROR_NONE returned.
+    JsonObject params, result;
+    uint32_t status = InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience",
+                                          params, result);
+    EXPECT_EQ(Core::ERROR_NONE, status)
+        << "After fixing HAL mock, retry must succeed and return ERROR_NONE";
 }

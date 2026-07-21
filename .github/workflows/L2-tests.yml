@@ -596,6 +596,25 @@ jobs:
           &&
           echo "BUILD_TYPE=VBN" | sudo tee /etc/device.properties
 
+      # Remove the Platform precondition from AudioOutput.json so the plugin
+      # can be activated without a Platform subsystem provider (e.g., PowerManager).
+      # In a production system the precondition is satisfied by the PowerManager
+      # plugin, but that plugin is not built/installed in this CI test environment.
+      - name: Remove Platform precondition from AudioOutput plugin config
+        run: |
+          find $GITHUB_WORKSPACE/install -name "AudioOutput.json" -print | while read F; do
+            python3 -c "
+import json, sys
+with open(sys.argv[1]) as f:
+    cfg = json.load(f)
+cfg.pop('precondition', None)
+with open(sys.argv[1], 'w') as f:
+    json.dump(cfg, f, indent=4)
+print('Removed precondition from ' + sys.argv[1])
+" "$F"
+          done
+          find $GITHUB_WORKSPACE/install -name "AudioOutput.json" -exec echo "=== {} ===" \; -exec cat {} \; || true
+
       # ---- Run tests -------------------------------------------------------
 
       - name: Run unit tests without valgrind
