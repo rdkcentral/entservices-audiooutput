@@ -513,6 +513,19 @@ jobs:
           &&
           cmake --install build/entservices-audiooutput
 
+      # Register AudioOutput L2 tests with L2TestsPlugin by appending a
+      # target_link_libraries() entry to the upstream CMakeLists.
+      # entservices-testframework 1.0.14 does not include PLUGIN_AUDIOOUTPUT in
+      # its L2TestsPlugin link rules, so tests=0 without this patch.
+      - name: Register AudioOutput L2 tests with L2TestsPlugin
+        run: |
+          FILE=$GITHUB_WORKSPACE/entservices-testframework/Tests/L2Tests/L2TestsPlugin/CMakeLists.txt
+          echo 'if(PLUGIN_AUDIOOUTPUT)' >> "$FILE"
+          echo '    target_link_libraries(${MODULE_NAME} PRIVATE ${CMAKE_INSTALL_PREFIX}/lib/libWPEFrameworkL2TestsAudioOutput.so)' >> "$FILE"
+          echo 'endif()' >> "$FILE"
+          echo "Patched L2TestsPlugin CMakeLists.txt"
+          tail -6 "$FILE"
+
       # Build entservices-testframework (L2 runner: RdkServicesL2Test executable
       # + L2TestsPlugin). Must be built with the same plugin flags so the
       # L2TestsPlugin loads the AudioOutput L2 test shared library.
