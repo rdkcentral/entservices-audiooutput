@@ -603,7 +603,7 @@ jobs:
       - name: Remove Platform precondition from AudioOutput plugin config
         run: |
           find $GITHUB_WORKSPACE/install -name "AudioOutput.json" -print | while read F; do
-            python3 -c "
+            python3 - "$F" << 'PYEOF'
 import json, sys
 with open(sys.argv[1]) as f:
     cfg = json.load(f)
@@ -611,7 +611,7 @@ cfg.pop('precondition', None)
 with open(sys.argv[1], 'w') as f:
     json.dump(cfg, f, indent=4)
 print('Removed precondition from ' + sys.argv[1])
-" "$F"
+PYEOF
           done
           find $GITHUB_WORKSPACE/install -name "AudioOutput.json" -exec echo "=== {} ===" \; -exec cat {} \; || true
 
