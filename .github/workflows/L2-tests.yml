@@ -602,16 +602,10 @@ jobs:
       # plugin, but that plugin is not built/installed in this CI test environment.
       - name: Remove Platform precondition from AudioOutput plugin config
         run: |
-          find $GITHUB_WORKSPACE/install -name "AudioOutput.json" -print | while read F; do
-            python3 - "$F" << 'PYEOF'
-import json, sys
-with open(sys.argv[1]) as f:
-    cfg = json.load(f)
-cfg.pop('precondition', None)
-with open(sys.argv[1], 'w') as f:
-    json.dump(cfg, f, indent=4)
-print('Removed precondition from ' + sys.argv[1])
-PYEOF
+          find $GITHUB_WORKSPACE/install -name "AudioOutput.json" | while read F; do
+            tmp=$(mktemp)
+            jq 'del(.precondition)' "$F" > "$tmp" && mv "$tmp" "$F"
+            echo "Removed precondition from $F"
           done
           find $GITHUB_WORKSPACE/install -name "AudioOutput.json" -exec echo "=== {} ===" \; -exec cat {} \; || true
 
