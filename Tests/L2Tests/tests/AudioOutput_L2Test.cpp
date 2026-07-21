@@ -108,6 +108,12 @@ protected:
     // → device::Host::getInstance().Register(&_dsAudioPortNotification, ...)).
     device::Host::IAudioOutputPortEvents* dsListener = nullptr;
 
+    // Persistent AudioOutputPort object returned by getAudioOutputPort().
+    // AtmosMetadata() always calls getAudioOutputPort("HDMI0") after scanning
+    // getAudioOutputPorts(); without a mock setup the reference-return default
+    // action throws and crashes WPEFramework during plugin activation.
+    device::AudioOutputPort _audioPortObj;
+
     // Persistent AudioOutputPortType object whose getId() delegates to
     // p_audioOutputPortTypeMock (via AudioOutputPortType::impl).
     // Used by InjectSoundMode() as the return value of AudioOutputPortMock::getType().
@@ -192,9 +198,23 @@ AudioOutputL2Test::AudioOutputL2Test()
     ON_CALL(*p_managerImplMock, Initialize()).WillByDefault(Return());
     ON_CALL(*p_managerImplMock, DeInitialize()).WillByDefault(Return());
 
-    // Default: no ports → AtmosMetadata / onAudioModeChanged fast-exit
+    // Default: no ports → SoundMode / onAudioModeChanged fast-exit (empty list)
     ON_CALL(*p_hostImplMock, getAudioOutputPorts())
         .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
+
+    // AtmosMetadata() always calls getAudioOutputPort(portName) after the
+    // getAudioOutputPorts() loop, regardless of how many ports were returned.
+    // Return a reference to the persistent _audioPortObj so the plugin does not
+    // crash on the reference-return default action.
+    ON_CALL(*p_hostImplMock, getAudioOutputPort(_))
+        .WillByDefault(ReturnRef(_audioPortObj));
+
+    // isConnected()=false → AtmosMetadata takes the else branch and calls
+    // Host::getSinkDeviceAtmosCapability instead of aPort.getSinkDeviceAtmosCapability.
+    // NiceMock default for getSinkDeviceAtmosCapability leaves atmosCapability
+    // as dsAUDIO_ATMOS_NOTSUPPORTED → AtmosMetadata returns supported=false.
+    ON_CALL(*p_audioOutputPortMock, isConnected())
+        .WillByDefault(Return(false));
 
     // Capture the IAudioOutputPortEvents* listener that the plugin registers
     // during construction (registerDsEventHandlers → Host::Register).
