@@ -40,6 +40,7 @@ using ::testing::NiceMock;
 using ::testing::_;
 using ::testing::Return;
 using ::testing::ReturnRef;
+using ::testing::ReturnRefOfCopy;
 using ::testing::SaveArg;
 using ::testing::DoAll;
 using ::testing::A;
@@ -1091,6 +1092,7 @@ protected:
     device::AudioOutputPortType _portTypeObj;
     device::Host::IAudioOutputPortEvents* dsListener{nullptr};
     bool _activated{false};
+    std::string _portName;
 
     explicit AudioOutputL2Test_SoundMode_Common() : L2TestMocks()
     {
@@ -1136,7 +1138,8 @@ protected:
                   const std::string& portName)
     {
         ON_CALL(*p_audioOutputPortTypeMock, getId()).WillByDefault(Return(portTypeId));
-        ON_CALL(*p_audioOutputPortMock, getName()).WillByDefault(Return(portName));
+        _portName = portName;
+        ON_CALL(*p_audioOutputPortMock, getName()).WillByDefault(ReturnRef(_portName));
         ON_CALL(*p_audioOutputPortMock, getStereoMode()).WillByDefault(Return(stereoMode));
         ON_CALL(*p_audioOutputPortMock, getStereoAuto()).WillByDefault(Return(stereoAuto));
 
@@ -1289,7 +1292,7 @@ TEST_F(AudioOutputL2Test, AtmosMetadata_ArcPortDetected_SetsAudioPortToHdmiArc)
 
     // Port name contains "HDMI_ARC" → audioPort switches to "HDMI_ARC0" (line 350)
     ON_CALL(*p_audioOutputPortMock, getName())
-        .WillByDefault(Return(std::string("HDMI_ARC0")));
+        .WillByDefault(ReturnRefOfCopy(std::string("HDMI_ARC0")));
 
     // isConnected=false → takes else branch (host-level query)
     // (getSinkDeviceAtmosCapability returns NOTSUPPORTED by default)
