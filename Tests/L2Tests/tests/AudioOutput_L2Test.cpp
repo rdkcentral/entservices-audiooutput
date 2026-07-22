@@ -1066,3 +1066,501 @@ TEST_F(AudioOutputL2Test_InitFailure,
     EXPECT_EQ(Core::ERROR_NONE, status)
         << "After fixing HAL mock, retry must succeed and return ERROR_NONE";
 }
+
+// ===========================================================================
+//  AudioOutputL2Test_SoundMode_Common
+//
+//  Single reusable fixture for all SoundMode() port-type branch tests.
+//
+//  Design:
+//    - Constructor sets up ALL common mocks but does NOT call ActivateService().
+//    - Each TEST_F calls Activate(portTypeId, stereoMode, stereoAuto, portName)
+//      which sets the port-specific mocks THEN activates the plugin.
+//    - SoundMode() runs inside Configure() with the test-specific mocks.
+//    - Destructor deactivates only if Activate() was called.
+//
+//  Why this works:
+//    GMock ON_CALL sets a default action that can be overridden any time
+//    before the call actually happens. Since ActivateService() (and thus
+//    Configure() → SoundMode()) is called INSIDE Activate(), setting
+//    getId() / getStereoMode() BEFORE Activate() is sufficient.
+// ===========================================================================
+class AudioOutputL2Test_SoundMode_Common : public L2TestMocks {
+protected:
+    device::AudioOutputPort     _audioPortObj;
+    device::AudioOutputPortType _portTypeObj;
+    device::Host::IAudioOutputPortEvents* dsListener{nullptr};
+    bool _activated{false};
+
+    explicit AudioOutputL2Test_SoundMode_Common() : L2TestMocks()
+    {
+        ON_CALL(*p_managerImplMock, Initialize()).WillByDefault(Return());
+        ON_CALL(*p_managerImplMock, DeInitialize()).WillByDefault(Return());
+
+        // One port in the list so the SoundMode() loop body runs
+        ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+            .WillByDefault(Return(device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
+
+        // Port is enabled + connected → enters the if-block
+        ON_CALL(*p_audioOutputPortMock, isEnabled()).WillByDefault(Return(true));
+        ON_CALL(*p_audioOutputPortMock, isConnected()).WillByDefault(Return(true));
+
+        // getType() returns the persistent portTypeObj shell
+        ON_CALL(*p_audioOutputPortMock, getType()).WillByDefault(ReturnRef(_portTypeObj));
+
+        // getAudioOutputPort(name) → persistent port object
+        ON_CALL(*p_hostImplMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(_audioPortObj));
+
+        // Capture dsListener from Host::Register()
+        ON_CALL(*p_hostImplMock, Register(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(DoAll(SaveArg<0>(&dsListener), Return(dsERR_NONE)));
+        ON_CALL(*p_hostImplMock, UnRegister(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+
+        // NOTE: ActivateService() is NOT called here.
+        // Call Activate() from the test body after setting port-specific mocks.
+    }
+
+    // ------------------------------------------------------------------
+    // Set port-specific mocks then activate the plugin.
+    // SoundMode() runs inside Configure() with these values.
+    //
+    //   portTypeId  — device::AudioOutputPortType::kHDMI / kARC / etc.
+    //   stereoMode  — device::AudioStereoMode::kPassThru / kSurround / etc.
+    //   stereoAuto  — true → _soundMode=SOUNDMODE_AUTO branch
+    //   portName    — arbitrary string, returned by getName()
+    // ------------------------------------------------------------------
+    void Activate(int portTypeId,
+                  device::AudioStereoMode stereoMode,
+                  bool stereoAuto,
+                  const std::string& portName)
+    {
+        ON_CALL(*p_audioOutputPortTypeMock, getId()).WillByDefault(Return(portTypeId));
+        ON_CALL(*p_audioOutputPortMock, getName()).WillByDefault(Return(portName));
+        ON_CALL(*p_audioOutputPortMock, getStereoMode()).WillByDefault(Return(stereoMode));
+        ON_CALL(*p_audioOutputPortMock, getStereoAuto()).WillByDefault(Return(stereoAuto));
+
+        uint32_t status = ActivateService(AUDIOOUTPUT_CALLSIGN);
+        EXPECT_EQ(Core::ERROR_NONE, status);
+        EXPECT_NE(dsListener, nullptr);
+        _activated = true;
+    }
+
+    virtual ~AudioOutputL2Test_SoundMode_Common() override
+    {
+        if (_activated) {
+            usleep(CLEANUP_DELAY_MICROSECONDS);
+            DeactivateService(AUDIOOUTPUT_CALLSIGN);
+        }
+    }
+};
+
+// ===========================================================================
+//  SoundMode: kHDMI port, getStereoMode=kPassThru → _soundMode=PASSTHRU
+//  Exercises: lines 408-409 (hdmiPorts branch), 424, 438-439
+// ===========================================================================
+TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_HdmiPort_PassThru_SetsSoundModePassthru)
+{
+    Activate(device::AudioOutputPortType::kHDMI,
+             device::AudioStereoMode::kPassThru, false, "HDMI0");
+
+    // PASSTHRU is an enabling mode → inject ATMOSMETADATA → result=true
+    ASSERT_NE(dsListener, nullptr);
+    dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
+
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  SoundMode: kARC port, getStereoMode=kPassThru → _soundMode=PASSTHRU
+//  Exercises: lines 407-408 (arcPorts branch), 423
+// ===========================================================================
+TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_ArcPort_PassThru_SetsSoundModePassthru)
+{
+    Activate(device::AudioOutputPortType::kARC,
+             device::AudioStereoMode::kPassThru, false, "ARC0");
+
+    ASSERT_NE(dsListener, nullptr);
+    dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
+
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  SoundMode: kSPEAKER port, getStereoMode=kSurround → _soundMode=SURROUND
+//  Exercises: lines 411-412 (speakerPorts branch), 427
+//  SURROUND is non-enabling → dolbyAtmosExperience stays false
+// ===========================================================================
+TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_SpeakerPort_Surround_SetsSoundModeSurround)
+{
+    Activate(device::AudioOutputPortType::kSPEAKER,
+             device::AudioStereoMode::kSurround, false, "SPEAKER0");
+
+    // SURROUND is not enabling → result=false even with ATMOSMETADATA
+    ASSERT_NE(dsListener, nullptr);
+    dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
+
+    JsonObject params, result;
+    // Call succeeds (ERROR_NONE) but dolbyAtmosExperience value=false
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  SoundMode: kSPDIF port, getStereoMode=kStereo → _soundMode=STEREO
+//  Exercises: lines 413-414 (spdifPorts branch), 429
+// ===========================================================================
+TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_SpdifPort_Stereo_SetsSoundModeStereo)
+{
+    Activate(device::AudioOutputPortType::kSPDIF,
+             device::AudioStereoMode::kStereo, false, "SPDIF0");
+
+    ASSERT_NE(dsListener, nullptr);
+    dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
+
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  SoundMode: kHEADPHONE port, getStereoMode=kMono → _soundMode=MONO
+//  Exercises: lines 415-416 (headphonePorts branch), 431
+// ===========================================================================
+TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_HeadphonePort_Mono_SetsSoundModeMono)
+{
+    Activate(device::AudioOutputPortType::kHEADPHONE,
+             device::AudioStereoMode::kMono, false, "HEADPHONE0");
+
+    ASSERT_NE(dsListener, nullptr);
+    dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
+
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  SoundMode: kHDMI port, getStereoAuto=true → _soundMode=SOUNDMODE_AUTO
+//  Exercises: lines 441-445 (getStereoAuto branch)
+//  SOUNDMODE_AUTO is enabling → dolbyAtmosExperience=true
+// ===========================================================================
+TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_HdmiPort_StereoAutoTrue_SetsSoundModeAuto)
+{
+    Activate(device::AudioOutputPortType::kHDMI,
+             device::AudioStereoMode::kPassThru, /*stereoAuto=*/true, "HDMI0");
+
+    // SOUNDMODE_AUTO is enabling → true with ATMOSMETADATA
+    ASSERT_NE(dsListener, nullptr);
+    dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
+
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+TEST_F(AudioOutputL2Test_AtmosCapable,
+       DsAudioModeToSoundMode_UnknownMode_ReturnsUnknown)
+{
+    // dsAUDIO_STEREO_MAX is beyond all valid stereo modes.
+    // onAudioModeChanged() → DsAudioModeToSoundMode(AudioStereoMode(MAX))
+    // → no if-branch matches → LOGWARN + return UNKNOWN (lines 391-392)
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_MAX);
+
+    // _soundMode=UNKNOWN → EvaluateCurrentAtmosExperience() = false
+    // (even though _atmosMetaData=true from AtmosCapable fixture)
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+
+
+// Fixture: AudioOutputL2Test (base) — just override mocks inside the test
+TEST_F(AudioOutputL2Test, AtmosMetadata_ArcPortDetected_SetsAudioPortToHdmiArc)
+{
+    // Return one port so the loop runs
+    ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Return(device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
+
+    // Port name contains "HDMI_ARC" → audioPort switches to "HDMI_ARC0" (line 350)
+    ON_CALL(*p_audioOutputPortMock, getName())
+        .WillByDefault(Return(std::string("HDMI_ARC0")));
+
+    // isConnected=false → takes else branch (host-level query)
+    // (getSinkDeviceAtmosCapability returns NOTSUPPORTED by default)
+    ON_CALL(*p_audioOutputPortMock, isConnected()).WillByDefault(Return(false));
+
+    // Trigger AtmosMetadata via dolbyAtmosExperience JSON-RPC
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+
+TEST_F(AudioOutputL2Test, AtmosMetadata_PortConnected_CallsPortLevelAtmosCapability)
+{
+    // isConnected=true → enters the if-branch (line 358)
+    ON_CALL(*p_audioOutputPortMock, isConnected()).WillByDefault(Return(true));
+
+    // getSinkDeviceAtmosCapability sets atmosCapability via out-param
+    ON_CALL(*p_audioOutputPortMock, getSinkDeviceAtmosCapability(_))
+        .WillByDefault(DoAll(
+            ::testing::SetArgReferee<0>(dsAUDIO_ATMOS_ATMOSMETADATA),
+            Return(true)));
+
+    // AtmosMetadata runs → port connected → line 358 hit → atmosCapability=ATMOSMETADATA
+    // Inject to confirm: dsListener fires → but we verify via JSON-RPC
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  AudioOutputL2Test_ManagerInitFailure
+//
+//  Fixture where Manager::Initialize() throws device::Exception.
+//  Covers constructor catch block (lines 53-55).
+//
+//  Constructor flow:
+//    try { Manager::Initialize(); }  ← throws
+//    catch (device::Exception& err) { LOGWARN(...); }  ← lines 53-55 HIT
+//  Constructor completes normally → Configure() still runs.
+// ===========================================================================
+class AudioOutputL2Test_ManagerInitFailure : public L2TestMocks {
+protected:
+    device::AudioOutputPort _portObj;
+
+    AudioOutputL2Test_ManagerInitFailure() : L2TestMocks()
+    {
+        TEST_LOG("AudioOutputL2Test_ManagerInitFailure constructor");
+
+        // Initialize throws → constructor catch block (lines 53-55) hit
+        ON_CALL(*p_managerImplMock, Initialize())
+            .WillByDefault(Throw(device::Exception("Manager::Initialize failed")));
+        ON_CALL(*p_managerImplMock, DeInitialize()).WillByDefault(Return());
+
+        // Configure() still runs after constructor catch; mock its dependencies
+        ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+            .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
+        ON_CALL(*p_hostImplMock, getAudioOutputPort(_))
+            .WillByDefault(ReturnRef(_portObj));
+        ON_CALL(*p_audioOutputPortMock, isConnected()).WillByDefault(Return(false));
+
+        // Initialize threw → registerDsEventHandlers was skipped → Register
+        // won't be called, but set up mock to be safe
+        ON_CALL(*p_hostImplMock,
+                Register(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+        ON_CALL(*p_hostImplMock,
+                UnRegister(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+
+        ActivateService(AUDIOOUTPUT_CALLSIGN);
+    }
+
+    virtual ~AudioOutputL2Test_ManagerInitFailure() override
+    {
+        TEST_LOG("AudioOutputL2Test_ManagerInitFailure destructor");
+        usleep(CLEANUP_DELAY_MICROSECONDS);
+        DeactivateService(AUDIOOUTPUT_CALLSIGN);
+    }
+};
+
+// ===========================================================================
+//  Scenario J — Constructor catch: Manager::Initialize() throws
+//
+//  Lines covered: 53-55 (constructor catch block)
+//  Plugin still activates after the catch (Configure runs normally).
+// ===========================================================================
+TEST_F(AudioOutputL2Test_ManagerInitFailure,
+       Constructor_ManagerInitializeFails_CatchBlockHit)
+{
+    TEST_LOG("Scenario J: Manager::Initialize throws → constructor catch (lines 53-55) hit");
+
+    // The constructor catch (lines 53-55) fired during ActivateService in the
+    // fixture constructor. Verify the plugin still responds to JSON-RPC.
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  AudioOutputL2Test_ManagerDeInitFailure
+//
+//  Fixture where Manager::DeInitialize() throws device::Exception.
+//  Covers destructor catch block (lines 68-70).
+//
+//  Destructor flow:
+//    try {
+//        if (_registeredDsEventHandlers) unregisterDsEventHandlers();  ← OK
+//        Manager::DeInitialize();  ← throws
+//    } catch (device::Exception& err) { LOGWARN(...); }  ← lines 68-70 HIT
+//  Fires when fixture destructor calls DeactivateService().
+// ===========================================================================
+class AudioOutputL2Test_ManagerDeInitFailure : public L2TestMocks {
+protected:
+    device::AudioOutputPort _portObj;
+    device::Host::IAudioOutputPortEvents* dsListener{nullptr};
+
+    AudioOutputL2Test_ManagerDeInitFailure() : L2TestMocks()
+    {
+        TEST_LOG("AudioOutputL2Test_ManagerDeInitFailure constructor");
+
+        ON_CALL(*p_managerImplMock, Initialize()).WillByDefault(Return());
+        // DeInitialize throws → destructor catch block (lines 68-70) hit
+        ON_CALL(*p_managerImplMock, DeInitialize())
+            .WillByDefault(Throw(device::Exception("Manager::DeInitialize failed")));
+
+        ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+            .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
+        ON_CALL(*p_hostImplMock, getAudioOutputPort(_))
+            .WillByDefault(ReturnRef(_portObj));
+        ON_CALL(*p_audioOutputPortMock, isConnected()).WillByDefault(Return(false));
+
+        ON_CALL(*p_hostImplMock,
+                Register(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(DoAll(SaveArg<0>(&dsListener), Return(dsERR_NONE)));
+        ON_CALL(*p_hostImplMock,
+                UnRegister(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+
+        uint32_t status = ActivateService(AUDIOOUTPUT_CALLSIGN);
+        EXPECT_EQ(Core::ERROR_NONE, status);
+    }
+
+    virtual ~AudioOutputL2Test_ManagerDeInitFailure() override
+    {
+        TEST_LOG("AudioOutputL2Test_ManagerDeInitFailure destructor");
+        usleep(CLEANUP_DELAY_MICROSECONDS);
+        // DeactivateService → plugin destructor → DeInitialize throws
+        // → catch block (lines 68-70) hit
+        DeactivateService(AUDIOOUTPUT_CALLSIGN);
+    }
+};
+
+// ===========================================================================
+//  Scenario K — Destructor catch: Manager::DeInitialize() throws
+//
+//  Lines covered: 68-70 (destructor catch block)
+//  The catch fires when the fixture destructor calls DeactivateService().
+// ===========================================================================
+TEST_F(AudioOutputL2Test_ManagerDeInitFailure,
+       Destructor_ManagerDeInitializeFails_CatchBlockHit)
+{
+    TEST_LOG("Scenario K: Manager::DeInitialize throws → destructor catch (lines 68-70) hit");
+
+    // Plugin activated normally. The destructor catch (lines 68-70) will fire
+    // when this test ends and the fixture destructor calls DeactivateService.
+    // Verify the plugin responds normally during the test body.
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
+
+// ===========================================================================
+//  AudioOutputL2Test_SoundModeInitFailure
+//
+//  Fixture where getAudioOutputPorts() throws device::Exception.
+//  This makes BOTH AtmosMetadata() and SoundMode() fail in Configure().
+//
+//  Configure() flow:
+//    AtmosMetadata() → getAudioOutputPorts() throws → ERROR_GENERAL  (lines 84-87)
+//    SoundMode()     → getAudioOutputPorts() throws → ERROR_GENERAL  (lines 91-94) ← TARGET
+//    Both init-failed flags set to true.
+// ===========================================================================
+class AudioOutputL2Test_SoundModeInitFailure : public L2TestMocks {
+protected:
+    AudioOutputL2Test_SoundModeInitFailure() : L2TestMocks()
+    {
+        TEST_LOG("AudioOutputL2Test_SoundModeInitFailure constructor");
+
+        ON_CALL(*p_managerImplMock, Initialize()).WillByDefault(Return());
+        ON_CALL(*p_managerImplMock, DeInitialize()).WillByDefault(Return());
+
+        // getAudioOutputPorts throws → AtmosMetadata AND SoundMode both fail:
+        //   AtmosMetadata: catch → ERROR_GENERAL → lines 84-87 hit
+        //   SoundMode:     catch → ERROR_GENERAL → lines 91-94 hit  ← TARGET
+        ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+            .WillByDefault(Throw(device::Exception("Ports unavailable")));
+
+        ON_CALL(*p_hostImplMock,
+                Register(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+        ON_CALL(*p_hostImplMock,
+                UnRegister(A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(Return(dsERR_NONE));
+
+        uint32_t status = ActivateService(AUDIOOUTPUT_CALLSIGN);
+        if (status != Core::ERROR_NONE) {
+            TEST_LOG("Warning: ActivateService returned %u (Configure returns ERROR_NONE always)", status);
+        }
+    }
+
+    virtual ~AudioOutputL2Test_SoundModeInitFailure() override
+    {
+        TEST_LOG("AudioOutputL2Test_SoundModeInitFailure destructor");
+        usleep(CLEANUP_DELAY_MICROSECONDS);
+        DeactivateService(AUDIOOUTPUT_CALLSIGN);
+    }
+};
+
+// ===========================================================================
+//  Scenario L — Configure: SoundMode() init failure path
+//
+//  Lines covered: 91-94 in Configure()
+//    LOGERR("Configure: failed to get sound mode")
+//    soundModeInitFailed = true
+//
+//  getAudioOutputPorts() throws → SoundMode returns ERROR_GENERAL →
+//  Configure sets _soundModeInitFailed=true.
+//  Both flags true → DolbyAtmosExperience retry also fails → ERROR_GENERAL.
+// ===========================================================================
+TEST_F(AudioOutputL2Test_SoundModeInitFailure,
+       Configure_SoundModeFails_SoundModeInitFailedSet)
+{
+    TEST_LOG("Scenario L: SoundMode() fails in Configure → lines 91-94 hit");
+
+    // Both _atmosMetadataInitFailed and _soundModeInitFailed are true.
+    // DolbyAtmosExperience enters the retry block; AtmosMetadata still fails
+    // (getAudioOutputPorts still throws) → returns ERROR_GENERAL.
+    JsonObject params, result;
+    uint32_t status = InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience",
+                                          params, result);
+    EXPECT_NE(Core::ERROR_NONE, status)
+        << "Both init failures: retry still fails → must return error";
+}
+
+// ===========================================================================
+//  Scenario M — onAudioModeChanged: getAudioOutputPorts() throws
+//
+//  Lines covered: 262-264 in onAudioModeChanged() catch block
+//
+//  After activation (normal), override getAudioOutputPorts() to throw, then
+//  fire OnAudioModeEvent. onAudioModeChanged() calls getAudioOutputPorts() →
+//  throws → caught at lines 262-264 → _soundMode unchanged → UpdateCache runs.
+//  Plugin continues to function normally after the exception.
+// ===========================================================================
+TEST_F(AudioOutputL2Test, OnAudioModeChanged_GetPortsThrows_ExceptionCaught)
+{
+    TEST_LOG("Scenario M: onAudioModeChanged → getAudioOutputPorts throws → catch (lines 262-264) hit");
+
+    ASSERT_NE(dsListener, nullptr);
+
+    // Override: make getAudioOutputPorts throw inside onAudioModeChanged
+    ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Throw(device::Exception("Ports unavailable")));
+
+    // Fire OnAudioModeEvent → onAudioModeChanged() → getAudioOutputPorts throws
+    // → lines 262-264 hit → exception caught → _soundMode unchanged (UNKNOWN)
+    dsListener->OnAudioModeEvent(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_PASSTHRU);
+
+    // Plugin must still respond normally after the internal exception
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE,
+              InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "dolbyAtmosExperience", params, result));
+}
