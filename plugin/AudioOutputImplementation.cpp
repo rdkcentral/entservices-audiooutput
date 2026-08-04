@@ -36,6 +36,8 @@
 namespace WPEFramework {
 namespace Plugin {
 
+    using JsonObject = Core::JSON::VariantContainer;
+
     static Exchange::IAudioOutput::AudioModes DsAudioModeToSoundMode(const device::AudioStereoMode& smode);
     SERVICE_REGISTRATION(AudioOutputImplementation, 1, 0);
 
@@ -337,28 +339,37 @@ namespace Plugin {
     {
         dsATMOSCapability_t atmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
         supported = false;
+        string audioPort = "HDMI0"; //default to HDMI
         try
         {
             if (TV == searchRdkProfile())
             {
-                // aPort.isEnabled() is the libds equivalent of getEnableAudioPort(HDMI_ARC0)
+                // TV platform: query DisplaySettings for the persisted user-intent HDMI_ARC0
+                // enabled flag. This is authoritative — do NOT rely on isConnected() (HAL
+                // returns unreliable state on some platforms).
                 bool arcEnabled = false;
-                try {
-                    device::AudioOutputPort arcPort = device::Host::getInstance().getAudioOutputPort("HDMI_ARC0");
-                    arcEnabled = arcPort.isEnabled();
-                    LOGINFO("AtmosMetadata: HDMI_ARC0 isEnabled=%s", arcEnabled ? "true" : "false");
-                } catch (const device::Exception& arcErr) {
-                    LOGWARN("AtmosMetadata: failed to get HDMI_ARC0 port: %s", arcErr.what());
+                Core::SystemInfo::SetEnvironment(_T("THUNDER_ACCESS"), _T("127.0.0.1:9998"));
+                WPEFramework::JSONRPC::LinkType<Core::JSON::IElement> dsClient(
+                    _T("org.rdk.DisplaySettings.1"), _T("org.rdk.DisplaySettings.1"), false, _T(""));
+                JsonObject params;
+                JsonObject result;
+                params["audioPort"] = "HDMI_ARC0";
+                if (dsClient.Invoke<JsonObject, JsonObject>(2000, "getEnableAudioPort", params, result) == Core::ERROR_NONE) {
+                    arcEnabled = result["enable"].Boolean();
+                    LOGINFO("AtmosMetadata: getEnableAudioPort(HDMI_ARC0) = %s", arcEnabled ? "true" : "false");
+                } else {
+                    LOGWARN("AtmosMetadata: getEnableAudioPort JSON-RPC failed");
                 }
-
                 if (arcEnabled)
                 {
+                    // ARC is enabled — query HDMI_ARC0 port directly, bypassing isConnected()
                     LOGINFO("AtmosMetadata: ARC enabled, querying HDMI_ARC0 for ATMOS capability");
                     device::AudioOutputPort aPort = device::Host::getInstance().getAudioOutputPort("HDMI_ARC0");
                     aPort.getSinkDeviceAtmosCapability(atmosCapability);
                 }
                 else
                 {
+                    // ARC not enabled or JSON-RPC failed — query TV panel itself
                     LOGINFO("AtmosMetadata: ARC not enabled, querying TV panel ATMOS capability");
                     device::Host::getInstance().getSinkDeviceAtmosCapability(atmosCapability);
                 }
@@ -366,13 +377,13 @@ namespace Plugin {
             else
             {
                 // STB platform: audio goes through HDMI0
-                device::AudioOutputPort aPort = device::Host::getInstance().getAudioOutputPort("HDMI0");
+                LOGINFO("AtmosMetadata: STB platform, audioPort = %s", audioPort.c_str());
+                device::AudioOutputPort aPort = device::Host::getInstance().getAudioOutputPort(audioPort);
                 if (aPort.isConnected())
                 {
                     aPort.getSinkDeviceAtmosCapability(atmosCapability);
                 }
-                else
-                {
+                else{
                     LOGWARN("AtmosMetadata: HDMI0 not connected, using host getSinkDeviceAtmosCapability");
                     device::Host::getInstance().getSinkDeviceAtmosCapability(atmosCapability);
                 }
@@ -381,11 +392,11 @@ namespace Plugin {
         catch(const device::Exception& err)
         {
             TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
-            return Core::ERROR_GENERAL;
+	        return Core::ERROR_GENERAL;
         }
 
-        if (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA) supported = true;
-        return Core::ERROR_NONE;
+        if(atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA) supported = true;
+        return (Core::ERROR_NONE);
     }
 
     // -------------------------------------------------------------------------
