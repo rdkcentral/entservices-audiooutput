@@ -63,9 +63,7 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation Destructor");
 
         try {
-            if (_registeredDsEventHandlers) {
-                unregisterDsEventHandlers();
-            }
+            unregisterDsEventHandlers();
             device::Manager::DeInitialize();
             LOGINFO("device::Manager::DeInitialize success");
         } catch (const device::Exception& err) {
