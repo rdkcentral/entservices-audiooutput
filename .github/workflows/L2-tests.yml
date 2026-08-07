@@ -164,7 +164,7 @@ jobs:
         with:
           repository: rdkcentral/entservices-audiooutput
           path: entservices-audiooutput
-          ref: develop
+          ref: feature/RDKEMW-20294_2
 
       - name: Checkout googletest
         uses: actions/checkout@v3

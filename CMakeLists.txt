@@ -47,11 +47,3 @@ endif()
 if(RDK_SERVICES_L1_TEST)
     add_subdirectory(Tests/L1Tests)
 endif()
-
-if(RDK_SERVICE_L2_TEST)
-    add_subdirectory(Tests/L2Tests)
-option(PLUGIN_AUDIOOUTPUT "Include AudioOutput plugin" OFF)
-
-if(PLUGIN_AUDIOOUTPUT)
-    add_subdirectory(plugin)
-endif()
