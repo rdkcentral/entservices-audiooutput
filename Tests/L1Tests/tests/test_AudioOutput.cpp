@@ -807,3 +807,232 @@ TEST(AudioOutputConstructorTests, ManagerInitializeThrows_ContinuesGracefully)
     device::AudioOutputPortType::setImpl(nullptr);
     device::Manager::setImpl(nullptr);
 }
+
+// ===========================================================================
+// Tests: Destructor — Manager::DeInitialize() throws (lines 69-71)
+//
+// The destructor calls unregisterDsEventHandlers() then DeInitialize() inside
+// a try block.  If DeInitialize() throws, lines 69-71 catch + LOGWARN must
+// fire.  The existing ManagerInitializeThrows test covers the constructor
+// catch (lines 56-58) but leaves the destructor catch (69-71) at count 0.
+// ===========================================================================
+TEST(AudioOutputDestructorTests, ManagerDeInitializeThrows_CatchBlockHit)
+{
+    TEST_LOG("Destructor: DeInitialize throws → catch block (lines 69-71) hit");
+
+    NiceMock<HostImplMock>            hostMock;
+    NiceMock<AudioOutputPortMock>     portMock;
+    NiceMock<AudioOutputPortTypeMock> portTypeMock;
+    NiceMock<ManagerImplMock>         managerMock;
+
+    device::Host::setImpl(&hostMock);
+    device::AudioOutputPort::setImpl(&portMock);
+    device::AudioOutputPortType::setImpl(&portTypeMock);
+    device::Manager::setImpl(&managerMock);
+
+    ON_CALL(managerMock, Initialize()).WillByDefault(Return());
+    // DeInitialize throws → destructor catch block (lines 69-71) fired when
+    // implLocal is destroyed at end of the inner scope below.
+    ON_CALL(managerMock, DeInitialize())
+        .WillByDefault(Throw(device::Exception("Manager DeInit failed")));
+    ON_CALL(hostMock, getAudioOutputPorts())
+        .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
+    ON_CALL(hostMock, Register(testing::A<device::Host::IAudioOutputPortEvents*>()))
+        .WillByDefault(Return(dsERR_NONE));
+    ON_CALL(hostMock, UnRegister(testing::A<device::Host::IAudioOutputPortEvents*>()))
+        .WillByDefault(Return(dsERR_NONE));
+
+    {
+        auto implLocal = Core::ProxyType<Plugin::AudioOutputImplementation>::Create();
+
+        // Plugin must still be usable despite DeInitialize being wired to throw
+        bool enabled = true;
+        EXPECT_EQ(Core::ERROR_NONE, implLocal->DolbyAtmosExperience(enabled));
+        EXPECT_FALSE(enabled);
+
+    } // implLocal destroyed: unregisterDsEventHandlers OK → DeInitialize throws
+      // → catch(device::Exception) at lines 69-71 is hit
+
+    device::Host::setImpl(nullptr);
+    device::AudioOutputPort::setImpl(nullptr);
+    device::AudioOutputPortType::setImpl(nullptr);
+    device::Manager::setImpl(nullptr);
+}
+
+// ===========================================================================
+// Tests: SoundMode — port-type branches missing from existing tests
+//
+// Existing tests cover kARC (Configure_SoundMode_HdmiArcPort_Precedence) and
+// kHDMI (Configure_SoundMode_HdmiPort_*). The branches for kSPEAKER, kSPDIF,
+// and kHEADPHONE (lines 433-438) and their precedence selections (lines
+// 449-454) are never exercised.
+//
+// Additionally, line 467 (kSPEAKER in the stereoAuto OR condition) is 0 because
+// all existing tests use kARC or kHDMI which short-circuit before line 467.
+// kSPEAKER and kHEADPHONE force evaluation of line 467.
+// ===========================================================================
+
+// kSPEAKER port, stereoAuto=false:
+//   SoundMode loop   → lines 433-434 (speakerPorts.push_back)
+//   Precedence block → lines 449-450 (selectedPort = speakerPorts.front())
+//   stereoAuto OR    → line 467 (kSPEAKER check: kARC=F ∧ kSPDIF=F ∧ kHDMI=F → kSPEAKER evaluated)
+//   stereoAuto false → OR(true) && false = false → SURROUND stays, not SOUNDMODE_AUTO
+TEST_F(AudioOutputImplementationTest, Configure_SoundMode_SpeakerPort_Surround)
+{
+    TEST_LOG("SoundMode: kSPEAKER stereoAuto=false → lines 433-434, 449-450, 467");
+
+    ON_CALL(hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Return(
+            device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
+    ON_CALL(audioOutputPortMock, isEnabled()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, isConnected()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, getType()).WillByDefault(ReturnRef(portTypeObj));
+    ON_CALL(audioOutputPortTypeMock, getId())
+        .WillByDefault(Return(device::AudioOutputPortType::kSPEAKER));
+    ON_CALL(audioOutputPortMock, getName()).WillByDefault(ReturnRef(portName));
+    ON_CALL(hostImplMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(portObj));
+    ON_CALL(audioOutputPortMock, getStereoMode())
+        .WillByDefault(Return(device::AudioStereoMode(dsAUDIO_STEREO_SURROUND)));
+    ON_CALL(audioOutputPortMock, getStereoAuto()).WillByDefault(Return(false));
+
+    NiceMock<ServiceMock> serviceMock;
+    EXPECT_EQ(Core::ERROR_NONE, impl->Configure(&serviceMock));
+
+    // _soundMode=SURROUND (non-enabling) → DolbyAtmosExperience=false
+    bool enabled = true;
+    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
+    EXPECT_FALSE(enabled) << "SURROUND is not an Atmos-enabling mode";
+}
+
+// kSPEAKER port, stereoAuto=true:
+//   All lines from the Surround test above PLUS line 469 (SOUNDMODE_AUTO via
+//   kSPEAKER path — kSPEAKER=true ∧ stereoAuto=true → SOUNDMODE_AUTO)
+TEST_F(AudioOutputImplementationTest, Configure_SoundMode_SpeakerPort_StereoAuto)
+{
+    TEST_LOG("SoundMode: kSPEAKER stereoAuto=true → SOUNDMODE_AUTO via line 467+469");
+
+    ON_CALL(hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Return(
+            device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
+    ON_CALL(audioOutputPortMock, isEnabled()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, isConnected()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, getType()).WillByDefault(ReturnRef(portTypeObj));
+    ON_CALL(audioOutputPortTypeMock, getId())
+        .WillByDefault(Return(device::AudioOutputPortType::kSPEAKER));
+    ON_CALL(audioOutputPortMock, getName()).WillByDefault(ReturnRef(portName));
+    ON_CALL(hostImplMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(portObj));
+    ON_CALL(audioOutputPortMock, getStereoMode())
+        .WillByDefault(Return(device::AudioStereoMode(dsAUDIO_STEREO_PASSTHRU)));
+    ON_CALL(audioOutputPortMock, getStereoAuto()).WillByDefault(Return(true));
+
+    NiceMock<ServiceMock> serviceMock;
+    EXPECT_EQ(Core::ERROR_NONE, impl->Configure(&serviceMock));
+
+    // _soundMode=SOUNDMODE_AUTO (enabling) + inject ATMOS_METADATA → true
+    TriggerAtmosCapabilityChange(dsAUDIO_ATMOS_ATMOSMETADATA);
+    bool enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
+    EXPECT_TRUE(enabled) << "SPEAKER stereoAuto=true → SOUNDMODE_AUTO + ATMOS_METADATA = true";
+}
+
+// kSPDIF port:
+//   SoundMode loop   → lines 435-436 (spdifPorts.push_back)
+//   Precedence block → lines 451-452 (selectedPort = spdifPorts.front())
+//   stereoAuto OR    → kSPDIF=true short-circuits at line 465 (kHDMI/kSPEAKER not reached)
+TEST_F(AudioOutputImplementationTest, Configure_SoundMode_SpdifPort_Passthru)
+{
+    TEST_LOG("SoundMode: kSPDIF port → lines 435-436, 451-452");
+
+    ON_CALL(hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Return(
+            device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
+    ON_CALL(audioOutputPortMock, isEnabled()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, isConnected()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, getType()).WillByDefault(ReturnRef(portTypeObj));
+    ON_CALL(audioOutputPortTypeMock, getId())
+        .WillByDefault(Return(device::AudioOutputPortType::kSPDIF));
+    ON_CALL(audioOutputPortMock, getName()).WillByDefault(ReturnRef(portName));
+    ON_CALL(hostImplMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(portObj));
+    ON_CALL(audioOutputPortMock, getStereoMode())
+        .WillByDefault(Return(device::AudioStereoMode(dsAUDIO_STEREO_PASSTHRU)));
+    ON_CALL(audioOutputPortMock, getStereoAuto()).WillByDefault(Return(false));
+
+    NiceMock<ServiceMock> serviceMock;
+    EXPECT_EQ(Core::ERROR_NONE, impl->Configure(&serviceMock));
+
+    // _soundMode=PASSTHRU (enabling) + inject ATMOS_METADATA → true
+    TriggerAtmosCapabilityChange(dsAUDIO_ATMOS_ATMOSMETADATA);
+    bool enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
+    EXPECT_TRUE(enabled) << "SPDIF PASSTHRU + ATMOS_METADATA = true";
+}
+
+// kHEADPHONE port:
+//   SoundMode loop   → lines 437-438 (headphonePorts.push_back)
+//   Precedence block → lines 453-454 (selectedPort = headphonePorts.front())
+//   stereoAuto OR    → kHEADPHONE is NOT in the condition, so kARC=F, kSPDIF=F,
+//                      kHDMI=F, kSPEAKER=F → ALL four sub-conditions evaluated
+//                      → line 467 (kSPEAKER) hit with result=false
+//                      → getStereoAuto() NOT called (OR short-circuits as false)
+TEST_F(AudioOutputImplementationTest, Configure_SoundMode_HeadphonePort_Mono)
+{
+    TEST_LOG("SoundMode: kHEADPHONE port → lines 437-438, 453-454, 467(false path)");
+
+    ON_CALL(hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Return(
+            device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
+    ON_CALL(audioOutputPortMock, isEnabled()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, isConnected()).WillByDefault(Return(true));
+    ON_CALL(audioOutputPortMock, getType()).WillByDefault(ReturnRef(portTypeObj));
+    ON_CALL(audioOutputPortTypeMock, getId())
+        .WillByDefault(Return(device::AudioOutputPortType::kHEADPHONE));
+    ON_CALL(audioOutputPortMock, getName()).WillByDefault(ReturnRef(portName));
+    ON_CALL(hostImplMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(portObj));
+    ON_CALL(audioOutputPortMock, getStereoMode())
+        .WillByDefault(Return(device::AudioStereoMode(dsAUDIO_STEREO_MONO)));
+    ON_CALL(audioOutputPortMock, getStereoAuto()).WillByDefault(Return(false));
+
+    NiceMock<ServiceMock> serviceMock;
+    EXPECT_EQ(Core::ERROR_NONE, impl->Configure(&serviceMock));
+
+    // _soundMode=MONO (non-enabling) → DolbyAtmosExperience=false
+    bool enabled = true;
+    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
+    EXPECT_FALSE(enabled) << "MONO is not an Atmos-enabling mode";
+}
+
+// Selected port is no longer connected between the loop check and the inner
+// isConnected() check → line 474 (LOGWARN "no longer connected") hit.
+//
+// isConnected() call sequence across Configure():
+//   call 1 — AtmosMetadata STB: getAudioOutputPort("HDMI0").isConnected()  → false
+//   call 2 — SoundMode loop:    aPort.isConnected()                        → true  (port classified)
+//   call 3 — SoundMode inner:   getAudioOutputPort(selected).isConnected() → false (→ line 474)
+TEST_F(AudioOutputImplementationTest, Configure_SoundMode_SelectedPortNoLongerConnected)
+{
+    TEST_LOG("SoundMode: port disconnected in inner check → line 474 hit");
+
+    ON_CALL(hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Return(
+            device::List<device::AudioOutputPort>{device::AudioOutputPort()}));
+    ON_CALL(audioOutputPortMock, isEnabled()).WillByDefault(Return(true));
+    // Sequence: false (AtmosMetadata), true (SoundMode loop), false (SoundMode inner)
+    EXPECT_CALL(audioOutputPortMock, isConnected())
+        .WillOnce(Return(false))        // AtmosMetadata: HDMI0 not connected → host-level path
+        .WillOnce(Return(true))         // SoundMode loop: enabled && connected → classify to hdmiPorts
+        .WillRepeatedly(Return(false)); // SoundMode inner: getAudioOutputPort(selected).isConnected()
+                                        //                  → false → LOGWARN (line 474)
+    ON_CALL(audioOutputPortMock, getType()).WillByDefault(ReturnRef(portTypeObj));
+    ON_CALL(audioOutputPortTypeMock, getId())
+        .WillByDefault(Return(device::AudioOutputPortType::kHDMI));
+    ON_CALL(audioOutputPortMock, getName()).WillByDefault(ReturnRef(portName));
+    ON_CALL(hostImplMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(portObj));
+
+    NiceMock<ServiceMock> serviceMock;
+    EXPECT_EQ(Core::ERROR_NONE, impl->Configure(&serviceMock));
+
+    // _soundMode=UNKNOWN (inner check failed) → DolbyAtmosExperience=false
+    bool enabled = true;
+    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
+    EXPECT_FALSE(enabled) << "UNKNOWN sound mode → dolbyAtmosExperience must be false";
+}
