@@ -23,6 +23,41 @@ set -e
 GITHUB_WORKSPACE="${PWD}"
 ls -la ${GITHUB_WORKSPACE}
 ############################
+# Generate stub headers BEFORE cmake so all -include and -I paths resolve
+cd $GITHUB_WORKSPACE/entservices-testframework/Tests
+mkdir -p headers \
+         headers/audiocapturemgr \
+         headers/rdk/ds \
+         headers/rdk/iarmbus \
+         headers/rdk/iarmmgrs-hal \
+         headers/rdk/halif/deepsleep-manager \
+         headers/ccec/drivers \
+         headers/network \
+         headers/proc \
+         headers/Dobby/Public/Dobby \
+         headers/Dobby/IpcService
+cd headers
+touch audiocapturemgr/audiocapturemgr_iarm.h
+touch ccec/drivers/CecIARMBusMgr.h
+touch rdk/ds/audioOutputPort.hpp rdk/ds/audioOutputPortConfig.hpp rdk/ds/audioOutputPortType.hpp
+touch rdk/ds/audioStereoMode.hpp rdk/ds/compositeIn.hpp rdk/ds/dsAudio.h
+touch rdk/ds/dsDisplay.h rdk/ds/dsError.h rdk/ds/dsMgr.h rdk/ds/dsTypes.h rdk/ds/dsUtl.h
+touch rdk/ds/exception.hpp rdk/ds/hdmiIn.hpp rdk/ds/host.hpp rdk/ds/list.hpp
+touch rdk/ds/manager.hpp rdk/ds/pixelResolution.hpp rdk/ds/sleepMode.hpp
+touch rdk/ds/videoDevice.hpp rdk/ds/videoOutputPort.hpp rdk/ds/videoOutputPortConfig.hpp
+touch rdk/ds/videoOutputPortType.hpp rdk/ds/videoResolution.hpp
+touch rdk/iarmbus/libIARM.h rdk/iarmbus/libIBus.h rdk/iarmbus/libIBusDaemon.h
+touch rdk/halif/deepsleep-manager/deepSleepMgr.h
+touch rdk/iarmmgrs-hal/mfrMgr.h rdk/iarmmgrs-hal/sysMgr.h
+touch network/wifiSrvMgrIarmIf.h network/netsrvmgrIarm.h
+touch Dobby/DobbyProtocol.h Dobby/DobbyProxy.h
+touch Dobby/Public/Dobby/IDobbyProxy.h Dobby/IpcService/IpcFactory.h
+touch libudev.h rfcapi.h rbus.h telemetry_busmessage_sender.h
+touch maintenanceMGR.h pkg.h edid-parser.hpp secure_wrapper.h wpa_ctrl.h
+touch proc/readproc.h btmgr.h rdk_logger_milestone.h
+cd $GITHUB_WORKSPACE
+
+############################
 # Build entservices-audiooutput
 echo "building entservices-audiooutput"
 
@@ -39,6 +74,7 @@ cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
 -DRDK_SERVICES_L1_TEST=ON \
 -DDS_FOUND=ON \
 -DPLUGIN_AUDIOOUTPUT=ON \
+-DTESTFRAMEWORK_DIR="$GITHUB_WORKSPACE/entservices-testframework" \
 -DCMAKE_CXX_FLAGS="-DEXCEPTIONS_ENABLE=ON \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/audiocapturemgr \
@@ -80,78 +116,6 @@ cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
 
 cmake --build build/entservices-audiooutput --target install
 echo "======================================================================================"
-
-############################
-# generating extrnal headers
-cd $GITHUB_WORKSPACE
-cd entservices-testframework/Tests
-echo " Empty mocks creation to avoid compilation errors"
-echo "======================================================================================"
-mkdir -p headers
-mkdir -p headers/audiocapturemgr
-mkdir -p headers/rdk/ds
-mkdir -p headers/rdk/iarmbus
-mkdir -p headers/rdk/iarmmgrs-hal
-mkdir -p headers/rdk/halif/
-mkdir -p headers/rdk/halif/deepsleep-manager
-mkdir -p headers/ccec/drivers
-mkdir -p headers/network
-mkdir -p headers/proc
-echo "dir created successfully"
-echo "======================================================================================"
-
-echo "======================================================================================"
-echo "empty headers creation"
-cd headers
-echo "current working dir: "${PWD}
-touch audiocapturemgr/audiocapturemgr_iarm.h
-touch ccec/drivers/CecIARMBusMgr.h
-touch rdk/ds/audioOutputPort.hpp
-touch rdk/ds/compositeIn.hpp
-touch rdk/ds/dsDisplay.h
-touch rdk/ds/dsError.h
-touch rdk/ds/dsMgr.h
-touch rdk/ds/dsTypes.h
-touch rdk/ds/dsUtl.h
-touch rdk/ds/exception.hpp
-touch rdk/ds/hdmiIn.hpp
-touch rdk/ds/host.hpp
-touch rdk/ds/list.hpp
-touch rdk/ds/manager.hpp
-touch rdk/ds/sleepMode.hpp
-touch rdk/ds/videoDevice.hpp
-touch rdk/ds/videoOutputPort.hpp
-touch rdk/ds/videoOutputPortConfig.hpp
-touch rdk/ds/videoOutputPortType.hpp
-touch rdk/ds/videoResolution.hpp
-touch rdk/ds/audioOutputPortType.hpp
-touch rdk/ds/audioOutputPortConfig.hpp
-touch rdk/ds/pixelResolution.hpp
-touch rdk/iarmbus/libIARM.h
-touch rdk/iarmbus/libIBus.h
-touch rdk/iarmbus/libIBusDaemon.h
-touch rdk/halif/deepsleep-manager/deepSleepMgr.h
-touch rdk/iarmmgrs-hal/mfrMgr.h
-touch rdk/iarmmgrs-hal/sysMgr.h
-touch network/wifiSrvMgrIarmIf.h
-touch network/netsrvmgrIarm.h
-touch libudev.h
-touch rfcapi.h
-touch rbus.h
-touch telemetry_busmessage_sender.h
-touch maintenanceMGR.h
-touch pkg.h
-touch edid-parser.hpp
-touch secure_wrapper.h
-touch wpa_ctrl.h
-touch proc/readproc.h
-touch btmgr.h
-touch rdk_logger_milestone.h
-echo "files created successfully"
-echo "======================================================================================"
-
-cd ../../
-cp -r /usr/include/gstreamer-1.0/gst /usr/include/glib-2.0/* /usr/lib/x86_64-linux-gnu/glib-2.0/include/* /usr/local/include/trower-base64/base64.h .
 
 ls -la ${GITHUB_WORKSPACE}
 exit 0
