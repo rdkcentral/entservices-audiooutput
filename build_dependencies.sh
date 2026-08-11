@@ -63,6 +63,11 @@ grep -q "virtual ~IAudioOutputPortEvents()" entservices-testframework/Tests/mock
     sed -i 's/class IAudioOutputPortEvents {/class IAudioOutputPortEvents {\n    public:\n        virtual ~IAudioOutputPortEvents() = default;/' \
         entservices-testframework/Tests/mocks/devicesettings.h
 
+# Patch ServiceMock.h: testframework 1.0.14 declares AddRef() as void,
+# but Thunder R4_4-RDK changed IReferenceCounted::AddRef() to return uint32_t.
+sed -i 's/MOCK_METHOD(void, AddRef/MOCK_METHOD(uint32_t, AddRef/' \
+    entservices-testframework/Tests/mocks/thunder/ServiceMock.h
+
 ############################
 # Build Thunder-Tools
 echo "====================================================================================="
