@@ -34,10 +34,10 @@ cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
 -DCMAKE_VERBOSE_MAKEFILE=ON \
 -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON \
 -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON \
+-DCMAKE_DISABLE_FIND_PACKAGE_DS=ON \
 -DCOMCAST_CONFIG=OFF \
 -DRDK_SERVICES_COVERITY=ON \
 -DRDK_SERVICES_L1_TEST=ON \
--DTESTFRAMEWORK_DIR="$GITHUB_WORKSPACE/entservices-testframework" \
 -DDS_FOUND=ON \
 -DPLUGIN_AUDIOOUTPUT=ON \
 -DCMAKE_CXX_FLAGS="-DEXCEPTIONS_ENABLE=ON \
@@ -49,6 +49,9 @@ cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/ccec/drivers \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/network \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/libusb \
+-I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby \
+-I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby/Public/Dobby \
+-I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby/IpcService \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/thunder \
 -I /usr/include/libdrm \
@@ -64,6 +67,12 @@ cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
 -include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/gdialservice.h \
 -include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/wpa_ctrl_mock.h \
 -include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/HdmiCec.h \
+-include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/libusb/libusb.h \
+-include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/Dobby.h \
+-include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby/DobbyProtocol.h \
+-include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby/DobbyProxy.h \
+-include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby/Public/Dobby/IDobbyProxy.h \
+-include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby/IpcService/IpcFactory.h \
 -Wall -Werror -Wno-error=format \
 -Wl,-wrap,system -Wl,-wrap,popen -Wl,-wrap,syslog \
 -DENABLE_TELEMETRY_LOGGING -DHAS_API_SYSTEM \
