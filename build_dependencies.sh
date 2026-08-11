@@ -83,7 +83,6 @@ PYEOF
 echo "======================================================================================"
 echo "building thunderTools"
 cd ThunderTools
-patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/00010-R4.4-Add-support-for-project-dir.patch
 cd -
 
 
