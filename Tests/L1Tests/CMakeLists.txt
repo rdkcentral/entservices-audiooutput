@@ -68,6 +68,9 @@ target_include_directories(${MODULE_NAME}
         ${TESTFRAMEWORK_DIR}/Tests/mocks/devicesettings
 
         # testframework: Thunder mocks (ServiceMock.h, COMLinkMock.h)
+        # Local override first — shadows testframework version to fix Thunder R4_4-RDK
+        # incompatibilities (e.g. AddRef return type changed to uint32_t)
+        ${CMAKE_CURRENT_SOURCE_DIR}/mocks/thunder
         ${TESTFRAMEWORK_DIR}/Tests/mocks/thunder
 )
 
