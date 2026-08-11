@@ -57,30 +57,15 @@ cd "$GITHUB_WORKSPACE"
 
 git clone --branch 1.0.14 https://github.com/rdkcentral/entservices-testframework.git
 
-############################
-# Patch devicesettings.h: add virtual destructor to IAudioOutputPortEvents so
-# that plugin subclasses can use '~Foo() override = default;' without error.
-python3 - <<'PYEOF'
-import re, sys
-path = "entservices-testframework/Tests/mocks/devicesettings.h"
-with open(path, "r") as f:
-    content = f.read()
-if "virtual ~IAudioOutputPortEvents()" not in content:
-    content = re.sub(
-        r"(class\s+IAudioOutputPortEvents\s*\{)",
-        r"\1\n    public:\n        virtual ~IAudioOutputPortEvents() = default;",
-        content
-    )
-    with open(path, "w") as f:
-        f.write(content)
-    print("Patched: added virtual ~IAudioOutputPortEvents() to devicesettings.h")
-else:
-    print("Skip: virtual ~IAudioOutputPortEvents() already present")
-PYEOF
+# Patch devicesettings.h: testframework 1.0.14 lacks virtual ~IAudioOutputPortEvents(),
+# required because the plugin's DsAudioPortNotification uses '~Foo() override = default;'.
+grep -q "virtual ~IAudioOutputPortEvents()" entservices-testframework/Tests/mocks/devicesettings.h || \
+    sed -i 's/class IAudioOutputPortEvents {/class IAudioOutputPortEvents {\n    public:\n        virtual ~IAudioOutputPortEvents() = default;/' \
+        entservices-testframework/Tests/mocks/devicesettings.h
 
 ############################
 # Build Thunder-Tools
-echo "======================================================================================"
+echo "====================================================================================="
 echo "building thunderTools"
 cd ThunderTools
 cd -
@@ -101,11 +86,6 @@ echo "==========================================================================
 echo "buliding thunder"
 
 cd Thunder
-patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Use_Legact_Alt_Based_On_ThunderTools_R4.4.3.patch
-patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/error_code_R4_4.patch
-patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/1004-Add-support-for-project-dir.patch
-patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/RDKEMW-733-Add-ENTOS-IDS.patch
-patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Jsonrpc_dynamic_error_handling.patch
 cd -
 
 cmake -G Ninja -S Thunder -B build/Thunder \
