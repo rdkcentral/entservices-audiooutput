@@ -29,7 +29,7 @@ cd ${GITHUB_WORKSPACE}
 
 apt update
 apt install -y valgrind lcov clang libsystemd-dev meson curl libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-pip install jsonref
+pip install jsonref --break-system-packages 2>/dev/null || pip install jsonref
 
 ############################
 # Build trevor-base64
@@ -45,7 +45,7 @@ cd ..
 # Clone the required repositories
 
 
-git clone --branch  R4_4-RDK https://github.com/rdkcentral/ThunderTools.git
+git clone --branch R4.4.3 https://github.com/rdkcentral/ThunderTools.git
 
 git clone --branch R4_4-RDK https://github.com/rdkcentral/Thunder.git
 
@@ -67,9 +67,6 @@ grep -q "virtual ~IAudioOutputPortEvents()" entservices-testframework/Tests/mock
 # Build Thunder-Tools
 echo "====================================================================================="
 echo "building thunderTools"
-cd ThunderTools
-cd -
-
 
 cmake -G Ninja -S ThunderTools -B build/ThunderTools \
     -DEXCEPTIONS_ENABLE=ON \
@@ -79,14 +76,16 @@ cmake -G Ninja -S ThunderTools -B build/ThunderTools \
 
 cmake --build build/ThunderTools --target install
 
+# Patch CppParser.py: ThunderTools R4.4.3 crashes on bare @retval tags in
+# entservices-apis 4.1.2 headers (IndexError: list index out of range).
+grep -q '_parts = desc.split' install/usr/sbin/ProxyStubGenerator/CppParser.py || \
+    sed -i 's/tagtokens.append(desc.split(" ",1)\[1\])/_parts = desc.split(" ",1)\n                tagtokens.append(_parts[1] if len(_parts) > 1 else "")/' \
+        install/usr/sbin/ProxyStubGenerator/CppParser.py
 
 ############################
 # Build Thunder
 echo "======================================================================================"
 echo "buliding thunder"
-
-cd Thunder
-cd -
 
 cmake -G Ninja -S Thunder -B build/Thunder \
     -DMESSAGING=ON \
@@ -153,6 +152,8 @@ echo " Empty mocks creation to avoid compilation errors"
 echo "======================================================================================"
 mkdir -p headers
 mkdir -p headers/rdk/ds
+mkdir -p headers/audiocapturemgr
+mkdir -p headers/libusb
 echo "dir created successfully"
 echo "======================================================================================"
 
@@ -184,6 +185,12 @@ touch rdk/ds/audioOutputPortType.hpp
 touch rdk/ds/audioOutputPortConfig.hpp
 touch rdk/ds/pixelResolution.hpp
 touch edid-parser.hpp
+mkdir -p Dobby/Public/Dobby
+mkdir -p Dobby/IpcService
+touch Dobby/DobbyProtocol.h
+touch Dobby/DobbyProxy.h
+touch Dobby/Public/Dobby/IDobbyProxy.h
+touch Dobby/IpcService/IpcFactory.h
 echo "files created successfully"
 echo "======================================================================================"
 
