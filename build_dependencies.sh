@@ -28,7 +28,7 @@ cd ${GITHUB_WORKSPACE}
 #1. Install Dependencies and packages
 
 apt update
-apt install -y valgrind lcov clang libsystemd-dev meson curl libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+apt install -y valgrind lcov clang libsystemd-dev meson curl libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libdrm-dev
 pip install jsonref --break-system-packages 2>/dev/null || pip install jsonref
 
 ############################
@@ -45,7 +45,7 @@ cd ..
 # Clone the required repositories
 
 
-git clone --branch R4.4.3 https://github.com/rdkcentral/ThunderTools.git
+git clone --branch R4_4-RDK https://github.com/rdkcentral/ThunderTools.git
 
 git clone --branch R4_4-RDK https://github.com/rdkcentral/Thunder.git
 
@@ -76,8 +76,8 @@ cmake -G Ninja -S ThunderTools -B build/ThunderTools \
 
 cmake --build build/ThunderTools --target install
 
-# Patch CppParser.py: ThunderTools R4.4.3 crashes on bare @retval tags in
-# entservices-apis 4.1.2 headers (IndexError: list index out of range).
+# Patch CppParser.py: guard against bare @retval tags (no description text)
+# causing an IndexError in ProxyStubGenerator (ThunderTools R4_4-RDK branch).
 grep -q '_parts = desc.split' install/usr/sbin/ProxyStubGenerator/CppParser.py || \
     sed -i 's/tagtokens.append(desc.split(" ",1)\[1\])/_parts = desc.split(" ",1)\n                tagtokens.append(_parts[1] if len(_parts) > 1 else "")/' \
         install/usr/sbin/ProxyStubGenerator/CppParser.py
