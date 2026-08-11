@@ -55,18 +55,7 @@ cd ..
 git clone --branch develop https://github.com/rdkcentral/entservices-helpers.git
 cd "$GITHUB_WORKSPACE"
 
-git clone --branch 1.0.14 https://github.com/rdkcentral/entservices-testframework.git
-
-# # Patch devicesettings.h: testframework 1.0.14 lacks virtual ~IAudioOutputPortEvents(),
-# # required because the plugin's DsAudioPortNotification uses '~Foo() override = default;'.
-# grep -q "virtual ~IAudioOutputPortEvents()" entservices-testframework/Tests/mocks/devicesettings.h || \
-#     sed -i 's/class IAudioOutputPortEvents {/class IAudioOutputPortEvents {\n    public:\n        virtual ~IAudioOutputPortEvents() = default;/' \
-#         entservices-testframework/Tests/mocks/devicesettings.h
-
-# # Patch ServiceMock.h: testframework 1.0.14 declares AddRef() as void,
-# # but Thunder R4_4-RDK changed IReferenceCounted::AddRef() to return uint32_t.
-# sed -i 's/MOCK_METHOD(void, AddRef/MOCK_METHOD(uint32_t, AddRef/' \
-#     entservices-testframework/Tests/mocks/thunder/ServiceMock.h
+git clone --branch feature/RDKEMW-20294 https://github.com/rdkcentral/entservices-testframework.git
 
 ############################
 # Build Thunder-Tools
@@ -81,11 +70,11 @@ cmake -G Ninja -S ThunderTools -B build/ThunderTools \
 
 cmake --build build/ThunderTools --target install
 
-# # Patch CppParser.py: guard against bare @retval tags (no description text)
-# # causing an IndexError in ProxyStubGenerator (ThunderTools R4_4-RDK branch).
-# grep -q '_parts = desc.split' install/usr/sbin/ProxyStubGenerator/CppParser.py || \
-#     sed -i 's/tagtokens.append(desc.split(" ",1)\[1\])/_parts = desc.split(" ",1)\n                tagtokens.append(_parts[1] if len(_parts) > 1 else "")/' \
-#         install/usr/sbin/ProxyStubGenerator/CppParser.py
+# Patch CppParser.py: guard against bare @retval tags (no description text)
+# causing an IndexError in ProxyStubGenerator (ThunderTools R4_4-RDK branch).
+grep -q '_parts = desc.split' install/usr/sbin/ProxyStubGenerator/CppParser.py || \
+    sed -i 's/tagtokens.append(desc.split(" ",1)\[1\])/_parts = desc.split(" ",1)\n                tagtokens.append(_parts[1] if len(_parts) > 1 else "")/' \
+        install/usr/sbin/ProxyStubGenerator/CppParser.py
 
 ############################
 # Build Thunder
