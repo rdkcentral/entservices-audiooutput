@@ -418,7 +418,7 @@ namespace Plugin {
     uint32_t AudioOutputImplementation::SoundMode(Exchange::IAudioOutput::AudioModes& mode) const
     {
 	    mode = Exchange::IAudioOutput::UNKNOWN;
-        std::vector<std::string> hdmiArcPorts, hdmiPorts, speakerPorts, spdifPorts, headphonePorts;
+        std::vector<std::string> hdmiArcPorts, hdmiPorts,spdifPorts, headphonePorts;
 
         try {
             device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
@@ -430,8 +430,6 @@ namespace Plugin {
                         hdmiArcPorts.push_back(aPort.getName());
                     else if (typeId == device::AudioOutputPortType::kHDMI)
                         hdmiPorts.push_back(aPort.getName());
-                    else if (typeId == device::AudioOutputPortType::kSPEAKER)
-                        speakerPorts.push_back(aPort.getName());
                     else if (typeId == device::AudioOutputPortType::kSPDIF)
                         spdifPorts.push_back(aPort.getName());
                     else if (typeId == device::AudioOutputPortType::kHEADPHONE)
@@ -446,8 +444,6 @@ namespace Plugin {
                 selectedPort = hdmiArcPorts.front();
             } else if (!hdmiPorts.empty()) {
                 selectedPort = hdmiPorts.front();
-            } else if (!speakerPorts.empty()) {
-                selectedPort = speakerPorts.front();
             } else if (!spdifPorts.empty()) {
                 selectedPort = spdifPorts.front();
             } else if (!headphonePorts.empty()) {
@@ -463,8 +459,7 @@ namespace Plugin {
 
                     if ((aPort.getType().getId() == device::AudioOutputPortType::kARC ||
                          aPort.getType().getId() == device::AudioOutputPortType::kSPDIF ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kSPEAKER)
+                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI )
                             && aPort.getStereoAuto()) {
                         mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                         LOGINFO("setting audio mode as auto");
