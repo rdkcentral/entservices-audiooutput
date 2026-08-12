@@ -70,12 +70,6 @@ cmake -G Ninja -S ThunderTools -B build/ThunderTools \
 
 cmake --build build/ThunderTools --target install
 
-# Patch CppParser.py: guard against bare @retval tags (no description text)
-# causing an IndexError in ProxyStubGenerator (ThunderTools R4_4-RDK branch).
-grep -q '_parts = desc.split' install/usr/sbin/ProxyStubGenerator/CppParser.py || \
-    sed -i 's/tagtokens.append(desc.split(" ",1)\[1\])/_parts = desc.split(" ",1)\n                tagtokens.append(_parts[1] if len(_parts) > 1 else "")/' \
-        install/usr/sbin/ProxyStubGenerator/CppParser.py
-
 ############################
 # Build Thunder
 echo "======================================================================================"
