@@ -1036,3 +1036,59 @@ TEST_F(AudioOutputImplementationTest, Configure_SoundMode_SelectedPortNoLongerCo
     EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
     EXPECT_FALSE(enabled) << "UNKNOWN sound mode → dolbyAtmosExperience must be false";
 }
+
+// ===========================================================================
+// Tests: DsAudioPortNotification stub overrides (lines 83-89)
+//
+// OnAudioOutHotPlug, OnAudioFormatUpdate, OnAudioPortStateChanged,
+// OnAssociatedAudioMixingChanged, OnAudioFaderControlChanged,
+// OnAudioPrimaryLanguageChanged, OnAudioSecondaryLanguageChanged
+// are all no-op stubs. Fire each callback through dsListener to hit them.
+// ===========================================================================
+TEST_F(AudioOutputImplementationTest, DsAudioPortNotification_StubOverrides_NoCrash)
+{
+    TEST_LOG("DsAudioPortNotification stub overrides: fire all no-op callbacks");
+
+    ASSERT_NE(dsListener, nullptr);
+
+    // Each call hits one stub line and returns immediately (no side effects).
+    dsListener->OnAudioOutHotPlug(dsAUDIOPORT_TYPE_HDMI, 0, true);         // line 83
+    dsListener->OnAudioFormatUpdate(dsAUDIO_FORMAT_PCM);                    // line 84
+    dsListener->OnAudioPortStateChanged(dsAUDIOPORT_STATE_INITIALIZED);     // line 85
+    dsListener->OnAssociatedAudioMixingChanged(true);                       // line 86
+    dsListener->OnAudioFaderControlChanged(50);                             // line 87
+    dsListener->OnAudioPrimaryLanguageChanged("eng");                       // line 88
+    dsListener->OnAudioSecondaryLanguageChanged("fra");                     // line 89
+
+    // Plugin must remain functional after all stub calls
+    bool enabled = true;
+    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
+    EXPECT_FALSE(enabled);
+}
+
+// ===========================================================================
+// Tests: INTERFACE_MAP (lines 50-52)
+//
+// BEGIN_INTERFACE_MAP / INTERFACE_ENTRY generates a QueryInterface override.
+// Calling QueryInterface<IAudioOutput> and QueryInterface<IConfiguration>
+// exercises lines 50-52 and the interface dispatch table.
+// ===========================================================================
+TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_AudioOutput)
+{
+    TEST_LOG("INTERFACE_MAP: QueryInterface<IAudioOutput> → non-null");
+
+    auto* iface = impl->QueryInterface<Exchange::IAudioOutput>();
+    ASSERT_NE(iface, nullptr)
+        << "QueryInterface<IAudioOutput> must return non-null";
+    iface->Release();
+}
+
+TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_Configuration)
+{
+    TEST_LOG("INTERFACE_MAP: QueryInterface<IConfiguration> → non-null");
+
+    auto* iface = impl->QueryInterface<Exchange::IConfiguration>();
+    ASSERT_NE(iface, nullptr)
+        << "QueryInterface<IConfiguration> must return non-null";
+    iface->Release();
+}
