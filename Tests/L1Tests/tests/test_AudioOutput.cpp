@@ -1075,20 +1075,20 @@ TEST_F(AudioOutputImplementationTest, DsAudioPortNotification_StubOverrides_NoCr
 // ===========================================================================
 TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_AudioOutput)
 {
-    TEST_LOG("INTERFACE_MAP: QueryInterface<IAudioOutput> → non-null");
+    TEST_LOG("INTERFACE_MAP: QueryInterface(IAudioOutput::ID) - non-null");
 
-    auto* iface = impl->QueryInterface<Exchange::IAudioOutput>();
+    auto* iface = static_cast<Exchange::IAudioOutput*>(impl->QueryInterface(Exchange::IAudioOutput::ID));
     ASSERT_NE(iface, nullptr)
-        << "QueryInterface<IAudioOutput> must return non-null";
+        << "QueryInterface(IAudioOutput::ID) must return non-null";
     iface->Release();
 }
 
 TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_Configuration)
 {
-    TEST_LOG("INTERFACE_MAP: QueryInterface<IConfiguration> → non-null");
+    TEST_LOG("INTERFACE_MAP: QueryInterface(IConfiguration::ID) - non-null");
 
-    auto* iface = impl->QueryInterface<Exchange::IConfiguration>();
+    auto* iface = static_cast<Exchange::IConfiguration*>(impl->QueryInterface(Exchange::IConfiguration::ID));
     ASSERT_NE(iface, nullptr)
-        << "QueryInterface<IConfiguration> must return non-null";
+        << "QueryInterface(IConfiguration::ID) must return non-null";
     iface->Release();
 }
