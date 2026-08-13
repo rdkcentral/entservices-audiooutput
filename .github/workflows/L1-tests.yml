@@ -357,6 +357,16 @@ jobs:
           /usr/include/libdrm/drm_mode.h
           /usr/include/xf86drm.h
           .
+          &&
+          mkdir -p "$GITHUB_WORKSPACE/ci-ds"
+          &&
+          cat > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake" <<'EOF'
+          set(DS_FOUND TRUE)
+          set(DS_INCLUDE_DIRS
+              "${CMAKE_SOURCE_DIR}/entservices-testframework/Tests/headers"
+          )
+          set(DS_LIBRARIES "")
+          EOF
 
       # Select toolchain file based on matrix (clang, gcc+coverage, gcc+no-coverage)
       - name: Set clang toolchain
@@ -471,7 +481,7 @@ jobs:
           -B build/entservices-audiooutput
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DUSE_THUNDER_R4=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
@@ -603,7 +613,7 @@ jobs:
           -DUSE_IARMBUS
           -DHAS_RBUS"
           -DCOMCAST_CONFIG=OFF
-          -DCMAKE_DISABLE_FIND_PACKAGE_DS=ON
+          # -DCMAKE_DISABLE_FIND_PACKAGE_DS=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_Udev=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
