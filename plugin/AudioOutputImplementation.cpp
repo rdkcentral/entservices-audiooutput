@@ -251,8 +251,7 @@ namespace Plugin {
                 if ((typeId == portType) &&
                     (typeId == dsAUDIOPORT_TYPE_HDMI_ARC ||
                      typeId == dsAUDIOPORT_TYPE_SPDIF ||
-                     typeId == dsAUDIOPORT_TYPE_HDMI ||
-                     typeId == dsAUDIOPORT_TYPE_SPEAKER) && aPortObj.getStereoAuto()) {
+                     typeId == dsAUDIOPORT_TYPE_HDMI) && aPortObj.getStereoAuto()) {
                     mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                     break;
                 } else if (typeId == portType) {
