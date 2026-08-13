@@ -29,7 +29,7 @@ cd ${GITHUB_WORKSPACE}
 
 apt update
 apt install -y valgrind lcov clang libsystemd-dev meson curl libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libdrm-dev
-pip install jsonref --break-system-packages 2>/dev/null || pip install jsonref
+pip install jsonref 
 
 ############################
 # Build trevor-base64
@@ -49,7 +49,7 @@ git clone --branch R4_4-RDK https://github.com/rdkcentral/ThunderTools.git
 
 git clone --branch R4_4-RDK https://github.com/rdkcentral/Thunder.git
 
-git clone --branch 4.1.2 https://github.com/rdkcentral/entservices-apis.git
+git clone --branch develop https://github.com/rdkcentral/entservices-apis.git
 
 cd ..
 git clone --branch develop https://github.com/rdkcentral/entservices-helpers.git

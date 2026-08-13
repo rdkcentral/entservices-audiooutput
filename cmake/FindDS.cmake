@@ -8,10 +8,7 @@ find_package(PkgConfig)
 
 # If DS_FOUND is pre-set (e.g. via -DDS_FOUND=ON for mock/CI builds),
 # skip library detection so REQUIRED find_package succeeds without real libs.
-if(DS_FOUND)
-    message(STATUS "DS: using pre-set DS_FOUND=ON (mock/CI build)")
-    return()
-endif()
+
 
 find_library(DS_LIBRARIES NAMES ds)
 find_library(DSHAL_LIBRARIES NAMES dshalcli)
