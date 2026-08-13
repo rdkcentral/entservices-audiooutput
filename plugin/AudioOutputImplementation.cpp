@@ -463,8 +463,7 @@ namespace Plugin {
 
                     if ((aPort.getType().getId() == device::AudioOutputPortType::kARC ||
                          aPort.getType().getId() == device::AudioOutputPortType::kSPDIF ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kSPEAKER)
+                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI)
                             && aPort.getStereoAuto()) {
                         mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                         LOGINFO("setting audio mode as auto");
