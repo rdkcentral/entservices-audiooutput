@@ -28,32 +28,6 @@ on:
       RDKCM_RDKE:
         required: true
 
-# -------------------------------------------------------------------
-# What audiooutput L1 needs vs systemservices:
-#
-# REMOVED (not needed by audiooutput):
-#   - entservices-powermanager   (no power management in audiooutput)
-#   - entservices-migration      (not related)
-#   - entservices-telemetry      (no telemetry plugin)
-#   - entservices-deviceinfo     (not related)
-#   - entservices-firmwareupdate (not related)
-#   - libsqlite3-dev, libboost-all-dev, libwebsocketpp-dev (no websocket/db)
-#   - protobuf/grpc packages     (no gRPC in audiooutput)
-#   - readprocMockInterface.h    (no process reading)
-#   - btmgr.h, tr181api.h        (no BT/TR181)
-#   - tvSettings/tvError mocks   (no TV settings)
-#   - essos-resmgr.h             (not related)
-#   - systemservices/* dirs/files (plugin-specific setup)
-#
-# KEPT:
-#   - ThunderTools R4.4.3, Thunder R4.4.1
-#   - entservices-apis feature/RDKEMW-20294 (audiooutput-specific branch)
-#   - entservices-helpers develop
-#   - entservices-testframework 1.0.14
-#   - googletest v1.15.0
-#   - DS HAL mocks (devicesettings.h, HostMock.h, AudioOutputPortMock.h, etc.)
-#   - IARMBus, RFC, RBus, Telemetry, Udev, pkg, maintenanceMGR mocks (force-included)
-# -------------------------------------------------------------------
 
 env:
   BUILD_TYPE: Debug
@@ -338,9 +312,7 @@ jobs:
           &&
           printf '%s\n'
           'set(DS_FOUND TRUE)'
-          'set(DS_INCLUDE_DIRS'
-          '    "${CMAKE_SOURCE_DIR}/entservices-testframework/Tests/headers"'
-          ')'
+          "set(DS_INCLUDE_DIRS \"$GITHUB_WORKSPACE/entservices-testframework/Tests/headers\")"
           'set(DS_LIBRARIES "")'
           > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake"
 
@@ -547,7 +519,7 @@ jobs:
           -B build/entservices-testframework
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DCMAKE_CXX_FLAGS="
           -fprofile-arcs
