@@ -342,16 +342,15 @@ jobs:
           /usr/include/libdrm/drm_mode.h
           /usr/include/xf86drm.h
           . &&
-          mkdir -p "$GITHUB_WORKSPACE/entservices-audiooutput/cmake" &&
-              cat > "$GITHUB_WORKSPACE/entservices-audiooutput/cmake/FindDS.cmake" <<'EOF'
-          set(DS_FOUND TRUE)
-          set(DS_INCLUDE_DIRS
-              "$ENV{GITHUB_WORKSPACE}/entservices-testframework/Tests/headers"
-          )
-          set(DS_LIBRARIES
-              "$ENV{GITHUB_WORKSPACE}/install/usr/lib/libTestMocklib.so"
-          )
-          EOF
+          mkdir -p "$GITHUB_WORKSPACE/ci-ds"
+          &&
+          printf '%s\n'
+          'set(DS_FOUND TRUE)'
+          'set(DS_INCLUDE_DIRS'
+          '    "${CMAKE_SOURCE_DIR}/entservices-testframework/Tests/headers"'
+          ')'
+          'set(DS_LIBRARIES "")'
+          > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake"
       - name: Set clang toolchain
         if: ${{ matrix.compiler == 'clang' }}
         run: echo "TOOLCHAIN_FILE=$GITHUB_WORKSPACE/entservices-testframework/Tests/clang.cmake" >> $GITHUB_ENV
