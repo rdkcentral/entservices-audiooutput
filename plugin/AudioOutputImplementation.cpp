@@ -251,8 +251,7 @@ namespace Plugin {
                 if ((typeId == portType) &&
                     (typeId == dsAUDIOPORT_TYPE_HDMI_ARC ||
                      typeId == dsAUDIOPORT_TYPE_SPDIF ||
-                     typeId == dsAUDIOPORT_TYPE_HDMI ||
-                     typeId == dsAUDIOPORT_TYPE_SPEAKER) && aPortObj.getStereoAuto()) {
+                     typeId == dsAUDIOPORT_TYPE_HDMI) && aPortObj.getStereoAuto()) {
                     mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                     break;
                 } else if (typeId == portType) {
@@ -322,7 +321,20 @@ namespace Plugin {
         if (!_atmosMetaData) {
             return false;
         }
-
+		// Atmos experience should be false always for panel device if no external device connected
+		if (TV == searchRdkProfile()) {
+            device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
+            for (size_t i = 0; i < aPorts.size(); i++) {
+                device::AudioOutputPort &aPort = aPorts.at(i);
+                if (aPort.isEnabled() && aPort.isConnected()) {
+			        auto typeId = aPort.getType().getId();
+			        if (typeId == device::AudioOutputPortType::kSPEAKER) {
+			            return false;
+			        }
+			     }
+		     }
+		}
+		
         switch (_soundMode) {
         case Exchange::IAudioOutput::PASSTHRU:
         case Exchange::IAudioOutput::DOLBYDIGITALPLUS:
@@ -463,8 +475,7 @@ namespace Plugin {
 
                     if ((aPort.getType().getId() == device::AudioOutputPortType::kARC ||
                          aPort.getType().getId() == device::AudioOutputPortType::kSPDIF ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kSPEAKER)
+                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI)
                             && aPort.getStereoAuto()) {
                         mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                         LOGINFO("setting audio mode as auto");
