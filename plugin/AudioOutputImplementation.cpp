@@ -321,7 +321,20 @@ namespace Plugin {
         if (!_atmosMetaData) {
             return false;
         }
-
+		// Atmos experience should be false always for panel device if no external device connected
+		if (TV == searchRdkProfile()) {
+            device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
+            for (size_t i = 0; i < aPorts.size(); i++) {
+                device::AudioOutputPort &aPort = aPorts.at(i);
+                if (aPort.isEnabled() && aPort.isConnected()) {
+			        auto typeId = aPort.getType().getId();
+			        if (typeId == device::AudioOutputPortType::kSPEAKER) {
+			            return false;
+			        }
+			     }
+		     }
+		}
+		
         switch (_soundMode) {
         case Exchange::IAudioOutput::PASSTHRU:
         case Exchange::IAudioOutput::DOLBYDIGITALPLUS:
