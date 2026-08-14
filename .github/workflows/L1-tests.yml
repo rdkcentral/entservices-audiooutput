@@ -60,7 +60,7 @@ env:
   REPO_NAME: "audiooutput"
   THUNDER_REF: "R4.4.1"
   INTERFACES_REF: "feature/RDKEMW-20294"
-  TESTFRAMEWORK_REF: "1.0.14"
+  TESTFRAMEWORK_REF: "feature/RDKEMW-20294"
   RDK_SERVICES_L1_TEST: "ON"
   ENABLE_CACHE: "false"
 
@@ -214,29 +214,6 @@ jobs:
           patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/RDKEMW-1007.patch
           cd -
 
-      # Patch devicesettings.h: add virtual ~IAudioOutputPortEvents() so the
-      # plugin's inner class can use '~DsAudioPortNotification() override = default;'
-      # without a compile error. See build_dependencies.sh for details.
-      - name: Patch devicesettings.h
-        run: |
-          python3 - <<'PYEOF'
-          import re, sys
-          path = "entservices-testframework/Tests/mocks/devicesettings.h"
-          with open(path, "r") as f:
-              content = f.read()
-          if "virtual ~IAudioOutputPortEvents()" not in content:
-              content = re.sub(
-                  r"(class\s+IAudioOutputPortEvents\s*\{)",
-                  r"\1\n    public:\n        virtual ~IAudioOutputPortEvents() = default;",
-                  content
-              )
-              with open(path, "w") as f:
-                  f.write(content)
-              print("Patched: added virtual ~IAudioOutputPortEvents() to devicesettings.h")
-          else:
-              print("Skip: virtual ~IAudioOutputPortEvents() already present")
-          PYEOF
-
       # ---- Builds ----------------------------------------------------------
 
       - name: Build ThunderTools
@@ -356,10 +333,9 @@ jobs:
           /usr/include/libdrm/drm.h
           /usr/include/libdrm/drm_mode.h
           /usr/include/xf86drm.h
-          .
-          &&
+          . &&
           mkdir -p "$GITHUB_WORKSPACE/ci-ds"
-          &&
+      
           cat > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake" <<'EOF'
           set(DS_FOUND TRUE)
           set(DS_INCLUDE_DIRS
