@@ -566,7 +566,7 @@ jobs:
           PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
           LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
           GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json"
-          RdkServicesL1Test &&
+          $GITHUB_WORKSPACE/build/entservices-testframework/Tests/L1Tests/RdkServicesL1Test &&
           cp -rf $(pwd)/rdkL1TestResults.json $GITHUB_WORKSPACE/rdkL1TestResultsWithoutValgrind.json &&
           rm -rf $(pwd)/rdkL1TestResults.json
 
@@ -583,7 +583,7 @@ jobs:
           --show-reachable=yes
           --track-fds=yes
           --fair-sched=try
-          RdkServicesL1Test &&
+          $GITHUB_WORKSPACE/build/entservices-testframework/Tests/L1Tests/RdkServicesL1Test &&
           cp -rf $(pwd)/rdkL1TestResults.json $GITHUB_WORKSPACE/rdkL1TestResultsWithValgrind.json &&
           rm -rf $(pwd)/rdkL1TestResults.json
 
