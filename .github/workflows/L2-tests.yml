@@ -230,6 +230,7 @@ jobs:
           -S "$GITHUB_WORKSPACE/Thunder"
           -B build/Thunder
           -DMESSAGING=ON
+          -DPROTOCOLS=ON
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
           -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
