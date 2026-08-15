@@ -225,63 +225,60 @@ jobs:
 
       # L2 Thunder: port 9998 (test runner connects via COM-RPC on localhost:9998)
       - name: Build Thunder
-        run: >
-          cmake -G Ninja
-          -S "$GITHUB_WORKSPACE/Thunder"
-          -B build/Thunder
-          -DMESSAGING=ON
-          -DPROTOCOLS=ON
-          -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
-          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
-          -DGENERIC_CMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          -DBINDING=127.0.0.1
-          -DPORT=9998
-          -DEXCEPTIONS_ENABLE=ON
-          &&
-          cmake --build build/Thunder -j8
-          &&
-          cmake --install build/Thunder
-          &&
-          echo "===== THUNDER DEBUG ====="
-          &&
-          echo "--- Thunder HEAD ---"
-          &&
-          git -C "$GITHUB_WORKSPACE/Thunder" rev-parse HEAD
-          &&
-          echo "--- Protocol libraries in build ---"
-          &&
-          find "$GITHUB_WORKSPACE/build/Thunder" \
-            \( -name '*Protocols*.so*' -o -name '*Protocols*.a' \) -print
-          &&
-          echo "--- Protocol libraries in install ---"
-          &&
-          find "$GITHUB_WORKSPACE/install/usr" \
-            \( -name '*Protocols*.so*' -o -name '*Protocols*.a' \) -print
-          &&
-          echo "--- All WPEFramework libraries ---"
-          &&
-          find "$GITHUB_WORKSPACE/install/usr/lib" \
-            -maxdepth 1 -name 'libWPEFramework*.so*' -printf '%f\n' | sort
-          &&
-          echo "--- Thunder CMake Protocol references ---"
-          &&
-          grep -RIn "WPEFrameworkProtocols\|Protocols" \
-            "$GITHUB_WORKSPACE/build/Thunder" 2>/dev/null | head -100 || true
+        run: |
+          cmake -G Ninja \
+            -S "$GITHUB_WORKSPACE/Thunder" \
+            -B build/Thunder \
+            -DMESSAGING=ON \
+            -DPROTOCOLS=ON \
+            -DHIDE_NON_EXTERNAL_SYMBOLS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr" \
+            -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake" \
+            -DGENERIC_CMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBINDING=127.0.0.1 \
+            -DPORT=9998 \
+            -DEXCEPTIONS_ENABLE=ON
 
-      - name: Build entservices-apis
-        run: >
-          cmake -G Ninja
-          -S "$GITHUB_WORKSPACE/entservices-apis"
-          -B build/entservices-apis
-          -DEXCEPTIONS_ENABLE=ON
-          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
-          &&
-          cmake --build build/entservices-apis -j8
-          &&
-          cmake --install build/entservices-apis
+          cmake --build build/Thunder -j8
+          cmake --install build/Thunder
+
+          echo "===== THUNDER DEBUG ====="
+
+          echo "--- Thunder HEAD ---"
+          git -C "$GITHUB_WORKSPACE/Thunder" rev-parse HEAD
+
+          echo "--- Protocol libraries in build ---"
+          find "$GITHUB_WORKSPACE/build/Thunder" \
+            \( -name '*Protocols*.so*' -o -name '*Protocols*.a' \) \
+            -print || true
+
+          echo "--- Protocol libraries in install ---"
+          find "$GITHUB_WORKSPACE/install/usr" \
+            \( -name '*Protocols*.so*' -o -name '*Protocols*.a' \) \
+            -print || true
+
+          echo "--- All WPEFramework libraries ---"
+          find "$GITHUB_WORKSPACE/install/usr/lib" \
+            -maxdepth 1 \
+            -name 'libWPEFramework*.so*' \
+            -printf '%f\n' | sort || true
+
+          echo "--- Protocol references in generated Thunder build ---"
+          grep -RIn "WPEFrameworkProtocols\|libWPEFrameworkProtocols" \
+            "$GITHUB_WORKSPACE/build/Thunder" 2>/dev/null | head -100 || true
+            - name: Build entservices-apis
+              run: >
+                cmake -G Ninja
+                -S "$GITHUB_WORKSPACE/entservices-apis"
+                -B build/entservices-apis
+                -DEXCEPTIONS_ENABLE=ON
+                -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
+                -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+                &&
+                cmake --build build/entservices-apis -j8
+                &&
+                cmake --install build/entservices-apis
 
       # Generate empty stub headers. Same DS/IARMBus set as L1.
       - name: Generate external headers
@@ -535,79 +532,81 @@ jobs:
       # + L2TestsPlugin). Must be built with the same plugin flags so the
       # L2TestsPlugin loads the AudioOutput L2 test shared library.
       - name: Build entservices-testframework
-        run: >
-          cmake -G Ninja
-          -S "$GITHUB_WORKSPACE/entservices-testframework"
-          -B build/entservices-testframework
-          -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
-          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
-          -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
-          -DCMAKE_CXX_FLAGS="
-          -DEXCEPTIONS_ENABLE=ON
-          -fprofile-arcs
-          -ftest-coverage
-          -DUSE_THUNDER_R4=ON
-          -DTHUNDER_VERSION=4
-          -DTHUNDER_VERSION_MAJOR=4
-          -DTHUNDER_VERSION_MINOR=4
-          -DRDK_SERVICE_L2_TEST
-          -DDISABLE_SECURITY_TOKEN
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/ds
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/audiocapturemgr
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/ccec/drivers
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/network
-          -I$GITHUB_WORKSPACE/entservices-helpers/helpers
-          -I$GITHUB_WORKSPACE/install/usr/include
-          -I$GITHUB_WORKSPACE/build/mocks
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/devicesettings.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Telemetry.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Udev.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/maintenanceMGR.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/pkg.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/secure_wrappermock.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/wpa_ctrl_mock.h
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/rdk_logger_milestone.h
-          -Wall -Wno-unused-result -Wno-deprecated-declarations -Wno-error=format=
-          -Wl,--no-as-needed
-          -DUSE_IARMBUS
-          -DHAS_RBUS
-          -DRDK_SERVICE_L2_TEST"
-          -DCOMCAST_CONFIG=OFF
-          -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
-          -DCMAKE_DISABLE_FIND_PACKAGE_Udev=ON
-          -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
-          -DCMAKE_DISABLE_FIND_PACKAGE_RBus=ON
-          -DPLUGIN_AUDIOOUTPUT=ON
-          -DPLUGIN_L2Tests=ON
-          -DRDK_SERVICE_L2_TEST=ON
-          -DDS_FOUND=ON
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          &&
+        run: |
+          cmake -G Ninja \
+            -S "$GITHUB_WORKSPACE/entservices-testframework" \
+            -B build/entservices-testframework \
+            -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr" \
+            -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake" \
+            -DHIDE_NON_EXTERNAL_SYMBOLS=OFF \
+            -DCMAKE_CXX_FLAGS="\
+            -DEXCEPTIONS_ENABLE=ON \
+            -fprofile-arcs \
+            -ftest-coverage \
+            -DUSE_THUNDER_R4=ON \
+            -DTHUNDER_VERSION=4 \
+            -DTHUNDER_VERSION_MAJOR=4 \
+            -DTHUNDER_VERSION_MINOR=4 \
+            -DRDK_SERVICE_L2_TEST \
+            -DDISABLE_SECURITY_TOKEN \
+            -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers \
+            -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/ds \
+            -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus \
+            -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal \
+            -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/audiocapturemgr \
+            -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/ccec/drivers \
+            -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/network \
+            -I$GITHUB_WORKSPACE/entservices-helpers/helpers \
+            -I$GITHUB_WORKSPACE/install/usr/include \
+            -I$GITHUB_WORKSPACE/build/mocks \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/devicesettings.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Telemetry.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Udev.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/maintenanceMGR.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/pkg.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/secure_wrappermock.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/wpa_ctrl_mock.h \
+            -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/rdk_logger_milestone.h \
+            -Wall -Wno-unused-result -Wno-deprecated-declarations -Wno-error=format= \
+            -Wl,--no-as-needed \
+            -DUSE_IARMBUS \
+            -DHAS_RBUS \
+            -DRDK_SERVICE_L2_TEST" \
+            -DCOMCAST_CONFIG=OFF \
+            -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_Udev=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_RBus=ON \
+            -DPLUGIN_AUDIOOUTPUT=ON \
+            -DPLUGIN_L2Tests=ON \
+            -DRDK_SERVICE_L2_TEST=ON \
+            -DDS_FOUND=ON \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
           echo "===== L2 TESTFRAMEWORK DEBUG ====="
-          &&
+
           echo "--- Required Protocol library ---"
-          &&
-          ls -l "$GITHUB_WORKSPACE/install/usr/lib/libWPEFrameworkProtocols.so" || true
-          &&
-          echo "--- L2 target dependencies mentioning Protocols ---"
-          &&
-          grep -RIn "libWPEFrameworkProtocols.so\|WPEFrameworkProtocols" \
+          ls -l \
+            "$GITHUB_WORKSPACE/install/usr/lib/libWPEFrameworkProtocols.so" \
+            || true
+
+          echo "--- Protocol references in generated testframework build ---"
+          grep -RIn \
+            "libWPEFrameworkProtocols.so\|WPEFrameworkProtocols" \
             "$GITHUB_WORKSPACE/build/entservices-testframework" \
             2>/dev/null | head -100 || true
-          &&
+
+          echo "--- Installed WPEFramework libraries ---"
+          find "$GITHUB_WORKSPACE/install/usr/lib" \
+            -maxdepth 1 \
+            -name 'libWPEFramework*.so*' \
+            -printf '%f\n' | sort || true
+
           cmake --build build/entservices-testframework -j8
-          &&
-          cmake --install build/entservices-testframework
-          &&
-          cmake --build build/entservices-testframework -j8
-          &&
           cmake --install build/entservices-testframework
 
       # ---- Minimal filesystem setup ----------------------------------------

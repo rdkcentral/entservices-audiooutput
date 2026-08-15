@@ -507,10 +507,10 @@ jobs:
           -fprofile-arcs
           -ftest-coverage
           -DEXCEPTIONS_ENABLE=ON
+          -DUSE_THUNDER_R4=ON
           -DTHUNDER_VERSION=4
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4
-          -DRDK_SERVICES_L1_TEST
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/ds
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
@@ -551,7 +551,6 @@ jobs:
           -DDS_FOUND=ON
           -DPLUGIN_AUDIOOUTPUT=ON
           -DRDK_SERVICES_L1_TEST=${{ env.RDK_SERVICES_L1_TEST }}
-          -DUSE_THUNDER_R4=ON
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           &&
           cmake --build build/entservices-testframework -j8
