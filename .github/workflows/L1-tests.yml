@@ -563,6 +563,18 @@ jobs:
       - name: Run unit tests without valgrind
         if: ${{ env.RDK_SERVICES_L1_TEST == 'ON' }}
         run: >
+          echo "=== Check RdkServicesL1Test ==="
+          find "$GITHUB_WORKSPACE" -type f -name "RdkServicesL1Test*" -print
+
+          echo "=== Check installed binaries ==="
+          find "$GITHUB_WORKSPACE/install/usr/bin" -maxdepth 1 -type f -executable -name "*RdkServices*" -print
+
+          echo "=== PATH ==="
+          echo "$PATH"
+
+          echo "=== command ==="
+          command -v RdkServicesL1Test || true
+
           PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
           LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
           GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json"
@@ -573,6 +585,38 @@ jobs:
       - name: Run unit tests with valgrind
         if: ${{ !env.ACT && env.RDK_SERVICES_L1_TEST == 'ON' && inputs.caller_source != 'testframework' }}
         run: >
+          echo "===== L1 DEBUG ====="
+          &&
+          echo "--- Build executable ---"
+          &&
+          ls -l "$GITHUB_WORKSPACE/build/entservices-testframework/Tests/L1Tests/RdkServicesL1Test" || true
+          &&
+          echo "--- Installed executable ---"
+          &&
+          ls -l "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL1Test" || true
+          &&
+          echo "--- Search for RdkServicesL1Test ---"
+          &&
+          find "$GITHUB_WORKSPACE" \
+            -type f \
+            -name 'RdkServicesL1Test' \
+            -print
+          &&
+          echo "--- PATH ---"
+          &&
+          echo "$PATH"
+          &&
+          echo "--- install/usr/bin ---"
+          &&
+          ls -la "$GITHUB_WORKSPACE/install/usr/bin" || true
+          &&
+          echo "--- Build target files ---"
+          &&
+          find "$GITHUB_WORKSPACE/build/entservices-testframework" \
+            -type f \
+            -name '*RdkServicesL1Test*' \
+            -print
+          &&
           PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
           LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
           GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json"

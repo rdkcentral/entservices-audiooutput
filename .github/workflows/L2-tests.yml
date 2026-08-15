@@ -243,6 +243,32 @@ jobs:
           cmake --build build/Thunder -j8
           &&
           cmake --install build/Thunder
+          &&
+          echo "===== THUNDER DEBUG ====="
+          &&
+          echo "--- Thunder HEAD ---"
+          &&
+          git -C "$GITHUB_WORKSPACE/Thunder" rev-parse HEAD
+          &&
+          echo "--- Protocol libraries in build ---"
+          &&
+          find "$GITHUB_WORKSPACE/build/Thunder" \
+            \( -name '*Protocols*.so*' -o -name '*Protocols*.a' \) -print
+          &&
+          echo "--- Protocol libraries in install ---"
+          &&
+          find "$GITHUB_WORKSPACE/install/usr" \
+            \( -name '*Protocols*.so*' -o -name '*Protocols*.a' \) -print
+          &&
+          echo "--- All WPEFramework libraries ---"
+          &&
+          find "$GITHUB_WORKSPACE/install/usr/lib" \
+            -maxdepth 1 -name 'libWPEFramework*.so*' -printf '%f\n' | sort
+          &&
+          echo "--- Thunder CMake Protocol references ---"
+          &&
+          grep -RIn "WPEFrameworkProtocols\|Protocols" \
+            "$GITHUB_WORKSPACE/build/Thunder" 2>/dev/null | head -100 || true
 
       - name: Build entservices-apis
         run: >
@@ -563,6 +589,22 @@ jobs:
           -DRDK_SERVICE_L2_TEST=ON
           -DDS_FOUND=ON
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          &&
+          echo "===== L2 TESTFRAMEWORK DEBUG ====="
+          &&
+          echo "--- Required Protocol library ---"
+          &&
+          ls -l "$GITHUB_WORKSPACE/install/usr/lib/libWPEFrameworkProtocols.so" || true
+          &&
+          echo "--- L2 target dependencies mentioning Protocols ---"
+          &&
+          grep -RIn "libWPEFrameworkProtocols.so\|WPEFrameworkProtocols" \
+            "$GITHUB_WORKSPACE/build/entservices-testframework" \
+            2>/dev/null | head -100 || true
+          &&
+          cmake --build build/entservices-testframework -j8
+          &&
+          cmake --install build/entservices-testframework
           &&
           cmake --build build/entservices-testframework -j8
           &&
