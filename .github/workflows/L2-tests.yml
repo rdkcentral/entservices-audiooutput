@@ -189,6 +189,15 @@ jobs:
           ref: develop
 
       # ---- Patches ---------------------------------------------------------
+
+
+      - name: Apply patches Thunder
+        run: |
+          cd $GITHUB_WORKSPACE/Thunder
+          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Increase_Timout_For_L2Tests_Plugin_R4_4-RDK.patch
+          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/LockFixedBuffer_compat_R4.4.6.patch
+          cd -
+
       - name: Apply patches entservices-apis
         run: |
           cd $GITHUB_WORKSPACE/entservices-apis
