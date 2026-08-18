@@ -56,7 +56,9 @@ namespace Plugin {
         Core::hresult DolbyAtmosExperience(bool& enabled /* @out */) const override;
         Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
-
+        Core::hresult GetSupportedAudioConfigs(IAudioConfigListIterator*& audioConfigs /* @out */)  const override;
+	Core::hresult GetAudioConfig(const std::string& audioConfig , bool& enabled /* @out */) const override;
+	Core::hresult SetAudioConfig(const std::string& audioConfig , const bool enabled) override;
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
 

@@ -190,6 +190,57 @@ namespace Plugin {
         return Core::ERROR_NONE;
     }
 
+    Core::hresult AudioOutputImplementation::SetAudioConfig(const std::string& audioConfig, const bool enable)
+    {
+	LOGINFO("Set %s audio configuration to enable = %d", audioConfig.c_str(), enable);
+	try
+        {
+            device::Host::getInstance().setApplicationAudioConfig(audioConfig, enable);
+        }
+        catch (const device::Exception& err)
+        {
+            LOGERR("Exception during DeviceSetting library call. code = %d message = %s", err.getCode(), err.what());
+	     return Core::ERROR_GENERAL;
+        }
+        return (Core::ERROR_NONE);
+
+    }
+
+    Core::hresult  AudioOutputImplementation::GetAudioConfig(const std::string& audioConfig, bool &enable /* @out */) const
+    {
+	LOGINFO("Get %s audio configuration", audioConfig.c_str());
+	try
+        {
+            device::Host::getInstance().getApplicationAudioConfig(audioConfig, &enable);
+	    LOGINFO("%s audio config enabled =%d", audioConfig.c_str(), enable);
+        }
+        catch (const device::Exception& err)
+        {
+            LOGERR("Exception during DeviceSetting library call. code = %d message = %s", err.getCode(), err.what());
+	     return Core::ERROR_GENERAL;
+        }
+        return (Core::ERROR_NONE);
+
+    }
+
+    Core::hresult AudioOutputImplementation::GetSupportedAudioConfigs(IAudioConfigListIterator*&  audioConfigs) const
+    {
+	std::vector<std::string> configList;
+        try
+        {
+            device::Host::getInstance().getApplicationAudioConfigList(configList);
+	    for (std::vector<std::string>::iterator it = configList.begin(); it != configList.end(); it++)
+               LOGINFO("audio config = %s", it->c_str());
+        }
+        catch (const device::Exception& err)
+        {
+             LOGERR("Exception during DeviceSetting library call. code = %d message = %s", err.getCode(), err.what());
+	     return Core::ERROR_GENERAL;
+        }
+	audioConfigs = (Core::Service<RPC::IteratorType<Exchange::IAudioOutput::IAudioConfigListIterator>>::Create<Exchange::IAudioOutput::IAudioConfigListIterator>(configList));
+        return (Core::ERROR_NONE);
+    }
+
     // -------------------------------------------------------------------------
     // IAudioOutput::Register / Unregister
     // -------------------------------------------------------------------------
