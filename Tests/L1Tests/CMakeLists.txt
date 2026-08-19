@@ -55,8 +55,8 @@ target_include_directories(${MODULE_NAME}
         # Plugin headers — AudioOutputImplementation.h and its DS includes
         ${PLUGIN_SOURCE_DIR}
 
-        # WPEFramework installed headers (Thunder, WPEFramework)
-        ${CMAKE_INSTALL_PREFIX}/include/WPEFramework
+        # Thunder installed headers (Thunder, Thunder)
+        ${CMAKE_INSTALL_PREFIX}/include/Thunder
 
         # entservices-helpers installed headers
         ${HELPERS_DIR}/helpers
@@ -77,7 +77,7 @@ target_include_directories(${MODULE_NAME}
 target_link_directories(${MODULE_NAME}
     PUBLIC
         ${CMAKE_INSTALL_PREFIX}/lib
-        ${CMAKE_INSTALL_PREFIX}/lib/wpeframework/plugins
+        ${CMAKE_INSTALL_PREFIX}/lib/Thunder/plugins
 )
 
 target_link_libraries(${MODULE_NAME}

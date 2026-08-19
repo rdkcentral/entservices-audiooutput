@@ -33,7 +33,7 @@
 #include "exception.hpp"
 #include "dsAudio.h"
 
-namespace WPEFramework {
+namespace Thunder {
 namespace Plugin {
 
     using JsonObject = Core::JSON::VariantContainer;
@@ -359,7 +359,7 @@ namespace Plugin {
                 // returns unreliable state on some platforms).
                 bool arcEnabled = false;
                 Core::SystemInfo::SetEnvironment(_T("THUNDER_ACCESS"), _T("127.0.0.1:9998"));
-                WPEFramework::JSONRPC::LinkType<Core::JSON::IElement> dsClient(
+                Thunder::JSONRPC::LinkType<Core::JSON::IElement> dsClient(
                     _T("org.rdk.DisplaySettings.1"), _T("org.rdk.DisplaySettings.1"), false, _T(""));
                 JsonObject params;
                 JsonObject result;
@@ -497,4 +497,4 @@ namespace Plugin {
     }
 
 } // namespace Plugin
-} // namespace WPEFramework
+} // namespace Thunder

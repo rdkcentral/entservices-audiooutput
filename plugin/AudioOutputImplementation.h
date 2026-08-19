@@ -33,7 +33,7 @@
 #include "host.hpp"
 #include "dsAudio.h"
 
-namespace WPEFramework {
+namespace Thunder {
 namespace Plugin {
 
     class AudioOutputImplementation
@@ -131,4 +131,4 @@ namespace Plugin {
     };
 
 } // namespace Plugin
-} // namespace WPEFramework
+} // namespace Thunder

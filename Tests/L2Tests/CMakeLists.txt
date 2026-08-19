@@ -95,7 +95,7 @@ target_include_directories(${MODULE_NAME}
         # testframework: L2Tests framework (L2TestsMock.h, L2Tests.h, InvokeServiceMethod...)
         ../../../entservices-testframework/Tests/L2Tests/L2TestsPlugin
 
-        # WPEFramework installed headers (Thunder, plugins, interfaces)
+        # Thunder installed headers (Thunder, plugins, interfaces)
         ${CMAKE_INSTALL_PREFIX}/include)
 
 install(TARGETS ${MODULE_NAME} DESTINATION lib)

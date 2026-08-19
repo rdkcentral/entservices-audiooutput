@@ -45,7 +45,7 @@ using ::testing::SaveArg;
 using ::testing::DoAll;
 using ::testing::A;
 using ::testing::Throw;
-using namespace WPEFramework;
+using namespace Thunder;
 
 // ---------------------------------------------------------------------------
 // Notification sink to capture OnDolbyAtmosExperienceChanged events
@@ -112,7 +112,7 @@ protected:
     // Persistent AudioOutputPort object returned by getAudioOutputPort().
     // AtmosMetadata() always calls getAudioOutputPort("HDMI0") after scanning
     // getAudioOutputPorts(); without a mock setup the reference-return default
-    // action throws and crashes WPEFramework during plugin activation.
+    // action throws and crashes Thunder during plugin activation.
     device::AudioOutputPort _audioPortObj;
 
     // Persistent AudioOutputPortType object whose getId() delegates to
@@ -1534,7 +1534,7 @@ protected:
 //  Configure sets both _atmosMetadataInitFailed and _soundModeInitFailed=true.
 //
 //  NOTE: Calling InvokeServiceMethod while getAudioOutputPorts() still throws
-//  causes std::terminate() — the exception propagates through WPEFramework's
+//  causes std::terminate() — the exception propagates through Thunder's
 //  noexcept JSON-RPC dispatch chain and crashes the process, leaking all mock
 //  objects. To avoid this, the mock is fixed to return an empty list before
 //  calling InvokeServiceMethod. The configure failure lines are already covered
@@ -1549,7 +1549,7 @@ TEST_F(AudioOutputL2Test_SoundModeInitFailure,
     // Lines 91-94 already exercised during ActivateService() in the constructor.
     // Fix getAudioOutputPorts() so the retry path in DolbyAtmosExperience()
     // does not throw — leaving it throwing causes std::terminate() via the
-    // WPEFramework noexcept JSONRPC dispatch chain and leaks all mock objects.
+    // Thunder noexcept JSONRPC dispatch chain and leaks all mock objects.
     ON_CALL(*p_hostImplMock, getAudioOutputPorts())
         .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
 

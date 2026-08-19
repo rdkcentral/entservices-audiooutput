@@ -27,7 +27,7 @@
 #include "UtilsLogging.h"
 #include "tracing/Logging.h"
 
-namespace WPEFramework {
+namespace Thunder {
 namespace Plugin {
 
     class AudioOutput : public PluginHost::IPlugin, public PluginHost::JSONRPC {
@@ -120,4 +120,4 @@ namespace Plugin {
     };
 
 } // namespace Plugin
-} // namespace WPEFramework
+} // namespace Thunder

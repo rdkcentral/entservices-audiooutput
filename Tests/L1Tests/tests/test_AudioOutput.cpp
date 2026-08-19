@@ -46,7 +46,7 @@ using ::testing::DoAll;
 using ::testing::SetArgReferee;
 using ::testing::Throw;
 using ::testing::Eq;
-using namespace WPEFramework;
+using namespace Thunder;
 
 // ---------------------------------------------------------------------------
 // Global mock pointers — wired into the devicesettings.h stubs via setImpl().
