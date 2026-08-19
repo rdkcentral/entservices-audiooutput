@@ -21,9 +21,9 @@ cmake_minimum_required(VERSION 3.3)
 
 project(EntServicesAudioOutput LANGUAGES CXX)
 
-find_package(Thunder REQUIRED)
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
+
+find_package(Thunder REQUIRED)
 
 set(PRODUCT_CONFIG_DIR "/etc/entservices")
 

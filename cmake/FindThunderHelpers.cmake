@@ -9,11 +9,11 @@
 
 find_library(ThunderHelpers_LIBRARIES
     NAMES ThunderHelpers
-    PATH_SUFFIXES Thunder/plugins)
+    PATH_SUFFIXES thunder/plugins)
 
 find_path(ThunderHelpers_INCLUDE_DIRS
     NAMES UtilsLogging.h
-    PATH_SUFFIXES Thunder/helpers)
+    PATH_SUFFIXES thunder/helpers)
 
 set(ThunderHelpers_LIBRARIES
     ${ThunderHelpers_LIBRARIES}
