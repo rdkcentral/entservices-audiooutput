@@ -321,24 +321,12 @@ namespace Plugin {
         if (!_atmosMetaData) {
             return false;
         }
-		// Atmos experience should be false always for panel device if no external device connected
-		if (TV == searchRdkProfile()) {
-            device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
-            for (size_t i = 0; i < aPorts.size(); i++) {
-                device::AudioOutputPort &aPort = aPorts.at(i);
-                if (aPort.isEnabled() && aPort.isConnected()) {
-			        auto typeId = aPort.getType().getId();
-			        if (typeId == device::AudioOutputPortType::kSPEAKER) {
-			            return false;
-			        }
-			     }
-		     }
-		}
-		
+				
         switch (_soundMode) {
         case Exchange::IAudioOutput::PASSTHRU:
         case Exchange::IAudioOutput::DOLBYDIGITALPLUS:
 	    case Exchange::IAudioOutput::SOUNDMODE_AUTO:
+		case  Exchange::IAudioOutput::SURROUND:
             return true;
         default:
             return false;
@@ -474,8 +462,7 @@ namespace Plugin {
                     mode = DsAudioModeToSoundMode(soundmode);
 
                     if ((aPort.getType().getId() == device::AudioOutputPortType::kARC ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kSPDIF ||
-                         aPort.getType().getId() == device::AudioOutputPortType::kHDMI)
+                         aPort.getType().getId() == device::AudioOutputPortType::kSPDIF)
                             && aPort.getStereoAuto()) {
                         mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
                         LOGINFO("setting audio mode as auto");
