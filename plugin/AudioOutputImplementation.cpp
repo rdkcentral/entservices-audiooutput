@@ -242,31 +242,34 @@ namespace Plugin {
                 static_cast<int>(portType), static_cast<int>(smode));
 
         Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+		bool isAudioModeChanged = false;
        
         try {
-            device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
-            for (size_t i = 0; i < aPorts.size(); i++) {
-                device::AudioOutputPort &aPortObj = aPorts.at(i);
-                dsAudioPortType_t typeId = static_cast<dsAudioPortType_t>(aPortObj.getType().getId());
-                if ((typeId == portType) &&
-                    (typeId == dsAUDIOPORT_TYPE_HDMI_ARC ||
-                     typeId == dsAUDIOPORT_TYPE_SPDIF ||
-                     typeId == dsAUDIOPORT_TYPE_HDMI) && aPortObj.getStereoAuto()) {
-                    mode = Exchange::IAudioOutput::SOUNDMODE_AUTO;
-                    break;
-                } else if (typeId == portType) {
-                    mode = DsAudioModeToSoundMode(device::AudioStereoMode(smode));
-                    break;
+               device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
+               for (size_t i = 0; i < aPorts.size(); i++) {
+                  device::AudioOutputPort &aPort = aPorts.at(i);
+                  if (aPort.isEnabled() && aPort.isConnected()) {
+			          auto typeId = aPort.getType().getId();
+			          if (typeId == portType) {
+			              isAudioModeChanged = true;
+						  break;
+					  } else {
+						  // Ignore event when only speaker0 connected as audiomode changes are occurring for 'hdmi_arc0`.
+						  TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), aPort.getName().c_str()));
+					  }
+				   }
                 }
-            }
         } catch (const device::Exception& err) {
             TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
         }
-
-        _adminLock.Lock();
-        _soundMode = mode;
-        _adminLock.Unlock();
-        UpdateCache();
+		
+		if (isAudioModeChanged) {
+            mode = DsAudioModeToSoundMode(device::AudioStereoMode(smode));
+            _adminLock.Lock();
+            _soundMode = mode;
+            _adminLock.Unlock();
+            UpdateCache();
+		} 
     }
 
     // -------------------------------------------------------------------------
