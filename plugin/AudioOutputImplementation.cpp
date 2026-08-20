@@ -321,9 +321,9 @@ namespace Plugin {
 
     bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
     {
-        if (!_atmosMetaData) {
-            return false;
-        }
+       // if (!_atmosMetaData) {
+         //   return false;
+      //  }
 				
         switch (_soundMode) {
         case Exchange::IAudioOutput::PASSTHRU:
