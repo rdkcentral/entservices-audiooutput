@@ -44,10 +44,10 @@ Step 1: Check AtmosCapability
 
 Step 2: Check soundMode
 ───────────────────────────────────────────────────────────
-  soundMode ∈ { MONO, STEREO, SURROUND, DOLBYDIGITAL, UNKNOWN }
+  soundMode ∈ { MONO, STEREO, DOLBYDIGITAL, UNKNOWN }
                                         →  return false
 
-  soundMode ∈ { PASSTHRU, DOLBYDIGITALPLUS, SOUNDMODE_AUTO }
+  soundMode ∈ { PASSTHRU, DOLBYDIGITALPLUS, SOUNDMODE_AUTO, SURROUND }
                                         →  return true
 ```
 
@@ -90,13 +90,14 @@ Both values are obtained by direct HAL queries via `device::Host` (DeviceSetting
 ### Functional Requirements
 
 - **REQ-01**: The plugin MUST expose a method `dolbyAtmosExperience` under callsign `org.rdk.AudioOutput` that returns a boolean.
-- **REQ-02**: `dolbyAtmosExperience` MUST return `true` only when `AtmosCapability == ATMOS_METADATA (2)` AND `soundMode` is one of `{ PASSTHRU, DOLBYDIGITALPLUS, SOUNDMODE_AUTO }`.
+- **REQ-02**: `dolbyAtmosExperience` MUST return `true` only when `AtmosCapability == ATMOS_METADATA (2)` AND `soundMode` is one of `{ PASSTHRU, DOLBYDIGITALPLUS, SOUNDMODE_AUTO, SURROUND }`.
 - **REQ-03**: `dolbyAtmosExperience` MUST return `false` when `AtmosCapability` is `NOT_SUPPORTED (0)` or `DDPLUS_STREAM (1)`, regardless of soundMode.
-- **REQ-04**: `dolbyAtmosExperience` MUST return `false` when `AtmosCapability == ATMOS_METADATA` but `soundMode` is one of `{ MONO, STEREO, SURROUND, DOLBYDIGITAL, UNKNOWN }`.
+- **REQ-04**: `dolbyAtmosExperience` MUST return `false` when `AtmosCapability == ATMOS_METADATA` but `soundMode` is one of `{ MONO, STEREO, DOLBYDIGITAL, UNKNOWN }`.
 - **REQ-05**: The plugin MUST send an `onDolbyAtmosExperienceChanged` notification to all subscribers whenever the computed `dolbyAtmosExperience` value changes.
 - **REQ-06**: The notification payload MUST include a `dolbyAtmosExperience` boolean field.
 - **REQ-07**: The plugin MUST listen to the `OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t, bool)` DS HAL event via `device::Host::IAudioOutputPortEvents` to detect changes in AtmosCapability.
 - **REQ-08**: The plugin MUST listen to the `OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t)` DS HAL event via `device::Host::IAudioOutputPortEvents` to detect changes in soundMode.
+- **REQ-08a**: When `OnAudioModeEvent` fires with `portType == dsAUDIOPORT_TYPE_HDMI_ARC` but only the internal speaker (speaker0) is connected and no external device is present, the plugin MUST ignore the event and MUST NOT update `_soundMode` or recompute `dolbyAtmosExperience`.
 - **REQ-09**: The plugin MUST call `device::Manager::Initialize()` at construction and query initial `AtmosCapability` and `soundMode` values directly from the DS HAL via `device::Host` before processing any client requests.
 - **REQ-10**: The plugin MUST NOT remove or modify `PlayerInfo.AtmosMetadata` or `PlayerInfo.soundMode`.
 - **REQ-11**: The plugin MUST return `Core::ERROR_NONE` on success and propagate errors appropriately.
