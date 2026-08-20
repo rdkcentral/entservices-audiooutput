@@ -153,17 +153,15 @@ protected:
     // Sets up getAudioOutputPorts() to return ONE port whose type id matches
     // portTypeVal, so plugin's onAudioModeChanged() updates _soundMode:
     //
-    //   if (typeId == portType && HDMI/ARC/SPDIF/SPEAKER && getStereoAuto())
-    //       _soundMode = SOUNDMODE_AUTO
-    //   else if (typeId == portType)
+    //   requires: port isEnabled() && isConnected()
+    //   if (typeId == portType)
     //       _soundMode = DsAudioModeToSoundMode(AudioStereoMode(smode))
     //
-    // stereoAuto=false triggers the DsAudioModeToSoundMode path.
-    // stereoAuto=true  triggers the SOUNDMODE_AUTO path.
+    // Fires OnAudioModeEvent(portTypeVal, smode) after setting up mocks.
+    // onAudioModeChanged() requires the port to be enabled and connected.
     // ------------------------------------------------------------------
     void InjectSoundMode(dsAudioPortType_t portTypeVal,
-                         dsAudioStereoMode_t smode,
-                         bool stereoAuto = false)
+                         dsAudioStereoMode_t smode)
     {
         ASSERT_NE(dsListener, nullptr)
             << "dsListener is null: plugin may not have called Host::Register";
@@ -182,9 +180,9 @@ protected:
         ON_CALL(*p_audioOutputPortTypeMock, getId())
             .WillByDefault(Return(static_cast<int>(portTypeVal)));
 
-        // stereoAuto controls which branch is taken in onAudioModeChanged
-        ON_CALL(*p_audioOutputPortMock, getStereoAuto())
-            .WillByDefault(Return(stereoAuto));
+        // onAudioModeChanged requires port to be enabled and connected to accept the event
+        ON_CALL(*p_audioOutputPortMock, isEnabled()).WillByDefault(Return(true));
+        ON_CALL(*p_audioOutputPortMock, isConnected()).WillByDefault(Return(true));
 
         dsListener->OnAudioModeEvent(portTypeVal, smode);
     }
@@ -356,34 +354,34 @@ TEST_F(AudioOutputL2Test, JsonRpc_DolbyAtmosExperience_DefaultFalse_WhenHalNotSu
 }
 
 // ===========================================================================
-//  Scenario 2 — COM-RPC, Atmos-capable hardware + non-enabling sound mode
+//  Scenario 2 — COM-RPC, Atmos-capable hardware + SURROUND mode → true
 //
 //  HAL state: _atmosMetaData=true  (injected in fixture constructor)
 //             _soundMode=SURROUND  (injected via DS HAL callback)
 //
 //  Decision logic:
-//    _atmosMetaData=true → Step 1 passes
-//    _soundMode=SURROUND → NOT in {PASSTHRU, DOLBYDIGITALPLUS, SOUNDMODE_AUTO}
-//    switch default: return false
+//    _atmosMetaData=true     → Step 1 passes
+//    SURROUND is in enabling set (PASSTHRU, DOLBYDIGITALPLUS, SOUNDMODE_AUTO, SURROUND)
+//    EvaluateCurrentAtmosExperience() = true
 //
-//  Real-world meaning: AVR supports Atmos but current content is plain Surround.
+//  Real-world meaning: AVR supports Atmos in surround mode → true.
 // ===========================================================================
-TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_DolbyAtmosExperience_AtmosCapableButSurroundMode_ReturnsFalse)
+TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_DolbyAtmosExperience_AtmosCapableAndSurroundMode_ReturnsTrue)
 {
-    TEST_LOG("Scenario 2: ATMOSMETADATA + SURROUND → dolbyAtmosExperience=false");
+    TEST_LOG("Scenario 2: ATMOSMETADATA + SURROUND → dolbyAtmosExperience=true");
 
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
 
     // Inject SURROUND sound mode via DS HAL OnAudioModeEvent callback.
     // dsAUDIO_STEREO_SURROUND → DsAudioModeToSoundMode → SURROUND
-    // SURROUND is not in the enabling set → evaluate=false
+    // SURROUND is in the enabling set → evaluate=true
     InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
 
-    bool enabled = true; // pre-set true to confirm it gets overwritten to false
+    bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_FALSE(enabled)
-        << "SURROUND is not an Atmos-enabling mode; result must be false";
+    EXPECT_TRUE(enabled)
+        << "SURROUND with ATMOSMETADATA hardware must return true";
 }
 
 // ===========================================================================
@@ -441,15 +439,14 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_DolbyAtmosExperience_AtmosCapableA
 }
 
 // ===========================================================================
-//  Scenario 3c — COM-RPC, Atmos-capable hardware + SOUNDMODE_AUTO → true
+//  Scenario 3c — COM-RPC, Atmos-capable hardware + PASSTHRU mode → true
 //
 //  HAL state: _atmosMetaData=true
-//             _soundMode=SOUNDMODE_AUTO (triggered by getStereoAuto()=true)
+//             _soundMode=PASSTHRU (injected; stereoAuto no longer affects onAudioModeChanged)
 //
-//  onAudioModeChanged() path for SOUNDMODE_AUTO:
-//    if (typeId==portType && HDMI/ARC/SPDIF/SPEAKER && getStereoAuto()==true)
-//        _soundMode = SOUNDMODE_AUTO   ← this branch
-//  SOUNDMODE_AUTO is in enabling set → true.
+//  onAudioModeChanged() no longer checks getStereoAuto(); mode is computed directly
+//  from DsAudioModeToSoundMode(dsAUDIO_STEREO_PASSTHRU) = PASSTHRU.
+//  PASSTHRU is in enabling set → true.
 // ===========================================================================
 TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_DolbyAtmosExperience_AtmosCapableAndSoundModeAuto_ReturnsTrue)
 {
@@ -458,13 +455,13 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_DolbyAtmosExperience_AtmosCapableA
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
 
-    // stereoAuto=true → onAudioModeChanged sets _soundMode=SOUNDMODE_AUTO
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_PASSTHRU, /*stereoAuto=*/true);
+    // stereoAuto no longer affects onAudioModeChanged; _soundMode = PASSTHRU
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_PASSTHRU);
 
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
     EXPECT_TRUE(enabled)
-        << "SOUNDMODE_AUTO with ATMOSMETADATA hardware must return true";
+        << "PASSTHRU with ATMOSMETADATA hardware must return true";
 }
 
 // ===========================================================================
@@ -515,9 +512,9 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredWithTrue_OnFalse
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
 
-    // Step 1: set initial state to false — SURROUND is non-enabling
-    // _atmosMetaData=true (fixture) + SURROUND → result=false
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
+    // Step 1: set initial state to false — STEREO is non-enabling
+    // _atmosMetaData=true (fixture) + STEREO → result=false
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_STEREO);
 
     bool initial = true;
     ASSERT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(initial));
@@ -556,7 +553,7 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredWithTrue_OnFalse
 // ===========================================================================
 TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredWithFalse_OnTrueToFalseTransition)
 {
-    TEST_LOG("Scenario B: PASSTHRU→SURROUND triggers OnDolbyAtmosExperienceChanged(false)");
+    TEST_LOG("Scenario B: PASSTHRU→STEREO triggers OnDolbyAtmosExperienceChanged(false)");
 
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -573,14 +570,14 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredWithFalse_OnTrue
     mAudioOutputPlugin->Register(&(*sink));
 
     // Step 3: trigger true→false
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_STEREO);
 
     // Step 4: wait for notification
     bool fired = sink->WaitForNotification(2000);
     EXPECT_TRUE(fired) << "Notification must fire on true→false transition";
 
     EXPECT_FALSE(sink->LastValue())
-        << "ATMOSMETADATA + SURROUND notification payload must be false";
+        << "ATMOSMETADATA + STEREO notification payload must be false";
 
     mAudioOutputPlugin->Unregister(&(*sink));
 }
@@ -599,21 +596,21 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredWithFalse_OnTrue
 // ===========================================================================
 TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_NotFired_WhenValueUnchanged_FalseToFalse)
 {
-    TEST_LOG("Scenario C: SURROUND→STEREO keeps result=false, no notification");
+    TEST_LOG("Scenario C: STEREO→MONO keeps result=false, no notification");
 
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
 
-    // Step 1: set state to false using SURROUND
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
+    // Step 1: set state to false using STEREO
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_STEREO);
 
     // Step 2: register sink
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
-    // Step 3: inject STEREO — also non-enabling
+    // Step 3: inject MONO — also non-enabling
     // old=false, new=false → no change → SendNotify NOT called
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_STEREO);
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_MONO);
 
     // Step 4: short wait — nothing should arrive
     bool fired = sink->WaitForNotification(500);
@@ -644,7 +641,7 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_NotFired_AfterUnregis
     ASSERT_NE(mAudioOutputPlugin, nullptr);
 
     // Set state to false so a PASSTHRU injection would be a real false→true
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_STEREO);
 
     // Register then immediately unregister BEFORE the triggering event
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
@@ -783,21 +780,21 @@ TEST_F(AudioOutputL2Test, ComRpc_Notification_NotFired_WhenAtmosCapabilityChange
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
 
-    // Step 1: inject SURROUND (_atmosMetaData still false → result=false)
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
+    // Step 1: inject STEREO (_atmosMetaData still false → result=false)
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_STEREO);
 
     // Step 2: register sink
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
-    // Step 3: fire ATMOSMETADATA — _atmosMetaData=true but SURROUND → still false
+    // Step 3: fire ATMOSMETADATA — _atmosMetaData=true but STEREO → still false
     // false→false → SendNotify NOT called
     InjectAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA, true);
 
     // Step 4: short wait — nothing should arrive
     bool fired = sink->WaitForNotification(500);
     EXPECT_FALSE(fired)
-        << "No notification: ATMOSMETADATA + SURROUND still evaluates to false";
+        << "No notification: ATMOSMETADATA + STEREO still evaluates to false";
     EXPECT_FALSE(sink->WasNotified());
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -913,8 +910,8 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Register_Duplicate_NotificationDel
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
 
-    // Set initial state to false (SURROUND is non-enabling)
-    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_SURROUND);
+    // Set initial state to false (STEREO is non-enabling)
+    InjectSoundMode(dsAUDIOPORT_TYPE_HDMI, dsAUDIO_STEREO_STEREO);
 
     // Create ONE sink, register it TWICE — second call hits the LOGERR duplicate path
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
@@ -1203,7 +1200,7 @@ TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_SpeakerPort_Surround_SetsSo
     Activate(device::AudioOutputPortType::kSPEAKER,
              device::AudioStereoMode::kSurround, false, "SPEAKER0");
 
-    // SURROUND is not enabling → result=false even with ATMOSMETADATA
+    // SURROUND is now an enabling mode with ATMOS_METADATA → result=true
     ASSERT_NE(dsListener, nullptr);
     dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
 
@@ -1248,16 +1245,17 @@ TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_HeadphonePort_Mono_SetsSoun
 }
 
 // ===========================================================================
-//  SoundMode: kHDMI port, getStereoAuto=true → _soundMode=SOUNDMODE_AUTO
-//  Exercises: lines 441-445 (getStereoAuto branch)
-//  SOUNDMODE_AUTO is enabling → dolbyAtmosExperience=true
+//  SoundMode: kHDMI port, getStereoAuto=true → kHDMI removed from stereoAuto condition
+//  _soundMode=PASSTHRU from getStereoMode() (stereoAuto no longer applies to kHDMI)
+//  PASSTHRU is enabling → dolbyAtmosExperience=true
 // ===========================================================================
-TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_HdmiPort_StereoAutoTrue_SetsSoundModeAuto)
+TEST_F(AudioOutputL2Test_SoundMode_Common, SoundMode_HdmiPort_StereoAutoTrue_SetsSoundModePassthru)
 {
     Activate(device::AudioOutputPortType::kHDMI,
              device::AudioStereoMode::kPassThru, /*stereoAuto=*/true, "HDMI0");
 
-    // SOUNDMODE_AUTO is enabling → true with ATMOSMETADATA
+    // kHDMI removed from stereoAuto condition: mode=PASSTHRU from getStereoMode(), not SOUNDMODE_AUTO
+    // PASSTHRU is enabling → true with ATMOSMETADATA
     ASSERT_NE(dsListener, nullptr);
     dsListener->OnDolbyAtmosCapabilitiesChanged(dsAUDIO_ATMOS_ATMOSMETADATA, true);
 
