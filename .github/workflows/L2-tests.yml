@@ -54,9 +54,10 @@ on:
 env:
   BUILD_TYPE: Debug
   REPO_NAME: "audiooutput"
-  THUNDER_REF: "R4.4.1"
-  INTERFACES_REF: "feature/RDKEMW-20294"
-  TESTFRAMEWORK_REF: "1.0.17"
+  THUNDER_TOOLS_COMMIT_SHA: "d5dd83c7c19c49c7f25c558c126500bd2d64f7a4"
+  THUNDER_COMMIT_SHA: "2c0fcc5529e7da734be558ca6efa05d934dcce31"
+  INTERFACES_REF: "develop"
+  TESTFRAMEWORK_REF: "feature/RDKEMW-20294"
 
 jobs:
   L2-tests:
@@ -136,14 +137,14 @@ jobs:
         with:
           repository: rdkcentral/Thunder
           path: Thunder
-          ref: ${{ env.THUNDER_REF }}
+          ref: ${{ env.THUNDER_COMMIT_SHA }}
 
       - name: Checkout ThunderTools
         uses: actions/checkout@v3
         with:
           repository: rdkcentral/ThunderTools
           path: ThunderTools
-          ref: R4.4.3
+          ref: ${{ env.THUNDER_TOOLS_COMMIT_SHA }}
 
       - name: Checkout entservices-testframework
         uses: actions/checkout@v3
@@ -189,22 +190,12 @@ jobs:
 
       # ---- Patches ---------------------------------------------------------
 
-      - name: Apply patches ThunderTools
-        run: |
-          cd $GITHUB_WORKSPACE/ThunderTools
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/00010-R4.4-Add-support-for-project-dir.patch
-          cd -
 
       - name: Apply patches Thunder
         run: |
           cd $GITHUB_WORKSPACE/Thunder
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Use_Legact_Alt_Based_On_ThunderTools_R4.4.3.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/error_code_R4_4.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/1004-Add-support-for-project-dir.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/RDKEMW-733-Add-ENTOS-IDS.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Jsonrpc_dynamic_error_handling.patch
-          # L2-specific: increase default timeouts so the L2 test plugin does not time out
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Increase_Timout_For_L2Tests_Plugin.patch
+          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Increase_Timout_For_L2Tests_Plugin_R4_4-RDK.patch
+          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/LockFixedBuffer_compat_R4.4.6.patch
           cd -
 
       - name: Apply patches entservices-apis
@@ -215,28 +206,6 @@ jobs:
           # L2-specific: adds IL2Test interface used by L2TestsPlugin
           patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/add-l2tests-interface.patch
           cd -
-
-      # Patch devicesettings.h: add virtual ~IAudioOutputPortEvents() so the
-      # plugin's DsAudioPortNotification can use '~Foo() override = default;'
-      - name: Patch devicesettings.h
-        run: |
-          python3 - <<'PYEOF'
-          import re, sys
-          path = "entservices-testframework/Tests/mocks/devicesettings.h"
-          with open(path, "r") as f:
-              content = f.read()
-          if "virtual ~IAudioOutputPortEvents()" not in content:
-              content = re.sub(
-                  r"(class\s+IAudioOutputPortEvents\s*\{)",
-                  r"\1\n    public:\n        virtual ~IAudioOutputPortEvents() = default;",
-                  content
-              )
-              with open(path, "w") as f:
-                  f.write(content)
-              print("Patched: added virtual ~IAudioOutputPortEvents() to devicesettings.h")
-          else:
-              print("Skip: virtual ~IAudioOutputPortEvents() already present")
-          PYEOF
 
       # ---- Builds ----------------------------------------------------------
 
@@ -261,10 +230,12 @@ jobs:
           -S "$GITHUB_WORKSPACE/Thunder"
           -B build/Thunder
           -DMESSAGING=ON
+          -DPROTOCOLS=ON
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
           -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
           -DGENERIC_CMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCONFIG_PATH="$GITHUB_WORKSPACE/install/etc/WPEFramework/plugins"
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DBINDING=127.0.0.1
           -DPORT=9998
@@ -363,8 +334,14 @@ jobs:
           /usr/include/libdrm/drm.h
           /usr/include/libdrm/drm_mode.h
           /usr/include/xf86drm.h
-          .
-
+          . &&
+          mkdir -p "$GITHUB_WORKSPACE/ci-ds"
+          &&
+          printf '%s\n'
+          'set(DS_FOUND TRUE)'
+          "set(DS_INCLUDE_DIRS \"$GITHUB_WORKSPACE/entservices-testframework/Tests/headers\")"
+          'set(DS_LIBRARIES "")'
+          > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake"
       - name: Set clang toolchain
         if: ${{ matrix.compiler == 'clang' }}
         run: echo "TOOLCHAIN_FILE=$GITHUB_WORKSPACE/entservices-testframework/Tests/clang.cmake" >> $GITHUB_ENV
@@ -459,7 +436,7 @@ jobs:
           -B build/entservices-audiooutput
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DUSE_THUNDER_R4=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
@@ -476,7 +453,6 @@ jobs:
           -DEXCEPTIONS_ENABLE=ON
           -fprofile-arcs
           -ftest-coverage
-          -DUSE_THUNDER_R4=ON
           -DTHUNDER_VERSION=4
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4
@@ -540,13 +516,12 @@ jobs:
           -B build/entservices-testframework
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DCMAKE_CXX_FLAGS="
           -DEXCEPTIONS_ENABLE=ON
           -fprofile-arcs
           -ftest-coverage
-          -DUSE_THUNDER_R4=ON
           -DTHUNDER_VERSION=4
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4
@@ -579,15 +554,14 @@ jobs:
           -DHAS_RBUS
           -DRDK_SERVICE_L2_TEST"
           -DCOMCAST_CONFIG=OFF
+          -DUSE_THUNDER_R4=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_Udev=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_RBus=ON
           -DPLUGIN_AUDIOOUTPUT=ON
-          -DPLUGIN_L2Tests=ON
           -DRDK_SERVICE_L2_TEST=ON
           -DDS_FOUND=ON
-          -DUSE_THUNDER_R4=ON
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           &&
           cmake --build build/entservices-testframework -j8
@@ -638,17 +612,19 @@ jobs:
 
       - name: Run unit tests without valgrind
         run: >
-          PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
-          LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
-          RdkServicesL2Test &&
+          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
+          export GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" &&
+          "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL2Test" &&
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithoutValgrind.json &&
           rm -rf $(pwd)/rdkL2TestResults.json
 
       - name: Run unit tests with valgrind
         if: ${{ !env.ACT && inputs.caller_source != 'testframework' }}
         run: >
-          PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
-          LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
+          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
+          export GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" &&
           valgrind
           --tool=memcheck
           --log-file=valgrind_log
@@ -656,7 +632,7 @@ jobs:
           --show-reachable=yes
           --track-fds=yes
           --fair-sched=try
-          RdkServicesL2Test &&
+          "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL2Test" &&
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithValgrind.json &&
           rm -rf $(pwd)/rdkL2TestResults.json
 

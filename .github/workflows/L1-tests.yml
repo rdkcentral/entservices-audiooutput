@@ -28,39 +28,14 @@ on:
       RDKCM_RDKE:
         required: true
 
-# -------------------------------------------------------------------
-# What audiooutput L1 needs vs systemservices:
-#
-# REMOVED (not needed by audiooutput):
-#   - entservices-powermanager   (no power management in audiooutput)
-#   - entservices-migration      (not related)
-#   - entservices-telemetry      (no telemetry plugin)
-#   - entservices-deviceinfo     (not related)
-#   - entservices-firmwareupdate (not related)
-#   - libsqlite3-dev, libboost-all-dev, libwebsocketpp-dev (no websocket/db)
-#   - protobuf/grpc packages     (no gRPC in audiooutput)
-#   - readprocMockInterface.h    (no process reading)
-#   - btmgr.h, tr181api.h        (no BT/TR181)
-#   - tvSettings/tvError mocks   (no TV settings)
-#   - essos-resmgr.h             (not related)
-#   - systemservices/* dirs/files (plugin-specific setup)
-#
-# KEPT:
-#   - ThunderTools R4.4.3, Thunder R4.4.1
-#   - entservices-apis feature/RDKEMW-20294 (audiooutput-specific branch)
-#   - entservices-helpers develop
-#   - entservices-testframework 1.0.14
-#   - googletest v1.15.0
-#   - DS HAL mocks (devicesettings.h, HostMock.h, AudioOutputPortMock.h, etc.)
-#   - IARMBus, RFC, RBus, Telemetry, Udev, pkg, maintenanceMGR mocks (force-included)
-# -------------------------------------------------------------------
 
 env:
   BUILD_TYPE: Debug
   REPO_NAME: "audiooutput"
-  THUNDER_REF: "R4.4.1"
-  INTERFACES_REF: "feature/RDKEMW-20294"
-  TESTFRAMEWORK_REF: "1.0.14"
+  THUNDER_TOOLS_COMMIT_SHA: "d5dd83c7c19c49c7f25c558c126500bd2d64f7a4"
+  THUNDER_COMMIT_SHA: "2c0fcc5529e7da734be558ca6efa05d934dcce31"
+  INTERFACES_REF: "develop"
+  TESTFRAMEWORK_REF: "feature/RDKEMW-20294"
   RDK_SERVICES_L1_TEST: "ON"
   ENABLE_CACHE: "false"
 
@@ -137,14 +112,14 @@ jobs:
         with:
           repository: rdkcentral/Thunder
           path: Thunder
-          ref: ${{ env.THUNDER_REF }}
+          ref: ${{ env.THUNDER_COMMIT_SHA }}
 
       - name: Checkout ThunderTools
         uses: actions/checkout@v3
         with:
           repository: rdkcentral/ThunderTools
           path: ThunderTools
-          ref: R4.4.3
+          ref: ${{ env.THUNDER_TOOLS_COMMIT_SHA }}
 
       - name: Checkout entservices-testframework
         uses: actions/checkout@v3
@@ -191,51 +166,12 @@ jobs:
 
       # ---- Patches ---------------------------------------------------------
 
-      - name: Apply patches ThunderTools
-        run: |
-          cd $GITHUB_WORKSPACE/ThunderTools
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/00010-R4.4-Add-support-for-project-dir.patch
-          cd -
-
-      - name: Apply patches Thunder
-        run: |
-          cd $GITHUB_WORKSPACE/Thunder
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Use_Legact_Alt_Based_On_ThunderTools_R4.4.3.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/error_code_R4_4.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/1004-Add-support-for-project-dir.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/RDKEMW-733-Add-ENTOS-IDS.patch
-          patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/Jsonrpc_dynamic_error_handling.patch
-          cd -
-
       - name: Apply patches entservices-apis
         run: |
           cd $GITHUB_WORKSPACE/entservices-apis
           rm -rf $GITHUB_WORKSPACE/entservices-apis/jsonrpc/DTV.json
           patch -p1 < $GITHUB_WORKSPACE/entservices-testframework/patches/RDKEMW-1007.patch
           cd -
-
-      # Patch devicesettings.h: add virtual ~IAudioOutputPortEvents() so the
-      # plugin's inner class can use '~DsAudioPortNotification() override = default;'
-      # without a compile error. See build_dependencies.sh for details.
-      - name: Patch devicesettings.h
-        run: |
-          python3 - <<'PYEOF'
-          import re, sys
-          path = "entservices-testframework/Tests/mocks/devicesettings.h"
-          with open(path, "r") as f:
-              content = f.read()
-          if "virtual ~IAudioOutputPortEvents()" not in content:
-              content = re.sub(
-                  r"(class\s+IAudioOutputPortEvents\s*\{)",
-                  r"\1\n    public:\n        virtual ~IAudioOutputPortEvents() = default;",
-                  content
-              )
-              with open(path, "w") as f:
-                  f.write(content)
-              print("Patched: added virtual ~IAudioOutputPortEvents() to devicesettings.h")
-          else:
-              print("Skip: virtual ~IAudioOutputPortEvents() already present")
-          PYEOF
 
       # ---- Builds ----------------------------------------------------------
 
@@ -356,7 +292,14 @@ jobs:
           /usr/include/libdrm/drm.h
           /usr/include/libdrm/drm_mode.h
           /usr/include/xf86drm.h
-          .
+          . &&
+          mkdir -p "$GITHUB_WORKSPACE/ci-ds"
+          &&
+          printf '%s\n'
+          'set(DS_FOUND TRUE)'
+          "set(DS_INCLUDE_DIRS \"$GITHUB_WORKSPACE/entservices-testframework/Tests/headers\")"
+          'set(DS_LIBRARIES "")'
+          > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake"
 
       # Select toolchain file based on matrix (clang, gcc+coverage, gcc+no-coverage)
       - name: Set clang toolchain
@@ -425,7 +368,6 @@ jobs:
           -fprofile-arcs
           -ftest-coverage
           -DEXCEPTIONS_ENABLE=ON
-          -DUSE_THUNDER_R4=ON
           -DTHUNDER_VERSION=4
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4
@@ -471,7 +413,7 @@ jobs:
           -B build/entservices-audiooutput
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DUSE_THUNDER_R4=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
@@ -485,7 +427,6 @@ jobs:
           -fprofile-arcs
           -ftest-coverage
           -DEXCEPTIONS_ENABLE=ON
-          -DUSE_THUNDER_R4=ON
           -DTHUNDER_VERSION=4
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4
@@ -520,7 +461,6 @@ jobs:
           -DENABLE_TELEMETRY_LOGGING
           -DHAS_API_SYSTEM
           -DHAS_RBUS
-          -DUSE_THUNDER_R4=ON
           -DTHUNDER_VERSION=4
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4"
@@ -561,17 +501,15 @@ jobs:
           -B build/entservices-testframework
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DCMAKE_CXX_FLAGS="
           -fprofile-arcs
           -ftest-coverage
           -DEXCEPTIONS_ENABLE=ON
-          -DUSE_THUNDER_R4=ON
           -DTHUNDER_VERSION=4
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4
-          -DRDK_SERVICES_L1_TEST
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/ds
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
@@ -603,7 +541,6 @@ jobs:
           -DUSE_IARMBUS
           -DHAS_RBUS"
           -DCOMCAST_CONFIG=OFF
-          -DCMAKE_DISABLE_FIND_PACKAGE_DS=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_Udev=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
@@ -612,7 +549,6 @@ jobs:
           -DDS_FOUND=ON
           -DPLUGIN_AUDIOOUTPUT=ON
           -DRDK_SERVICES_L1_TEST=${{ env.RDK_SERVICES_L1_TEST }}
-          -DUSE_THUNDER_R4=ON
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           &&
           cmake --build build/entservices-testframework -j8
@@ -624,19 +560,19 @@ jobs:
       - name: Run unit tests without valgrind
         if: ${{ env.RDK_SERVICES_L1_TEST == 'ON' }}
         run: >
-          PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
-          LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
-          GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json"
-          RdkServicesL1Test &&
+          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
+          export GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json" &&
+          "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL1Test" &&
           cp -rf $(pwd)/rdkL1TestResults.json $GITHUB_WORKSPACE/rdkL1TestResultsWithoutValgrind.json &&
           rm -rf $(pwd)/rdkL1TestResults.json
 
       - name: Run unit tests with valgrind
         if: ${{ !env.ACT && env.RDK_SERVICES_L1_TEST == 'ON' && inputs.caller_source != 'testframework' }}
         run: >
-          PATH=$GITHUB_WORKSPACE/install/usr/bin:${PATH}
-          LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}
-          GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json"
+          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
+          export GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json" &&
           valgrind
           --tool=memcheck
           --log-file=valgrind_log
@@ -644,7 +580,7 @@ jobs:
           --show-reachable=yes
           --track-fds=yes
           --fair-sched=try
-          RdkServicesL1Test &&
+          "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL1Test" &&
           cp -rf $(pwd)/rdkL1TestResults.json $GITHUB_WORKSPACE/rdkL1TestResultsWithValgrind.json &&
           rm -rf $(pwd)/rdkL1TestResults.json
 
