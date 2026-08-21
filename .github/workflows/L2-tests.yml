@@ -235,6 +235,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
           -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
           -DGENERIC_CMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCONFIG_PATH="$GITHUB_WORKSPACE/install/etc/WPEFramework/plugins"
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DBINDING=127.0.0.1
           -DPORT=9998
