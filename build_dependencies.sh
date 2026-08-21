@@ -29,7 +29,7 @@ cd ${GITHUB_WORKSPACE}
 
 apt update
 apt install -y valgrind lcov clang libsystemd-dev meson curl libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libdrm-dev
-pip install jsonref
+pip install jsonref 
 
 ############################
 # Build trevor-base64
