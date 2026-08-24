@@ -32,6 +32,8 @@
 #include "manager.hpp"
 #include "exception.hpp"
 #include "dsAudio.h"
+#include <stdio.h>
+
 
 namespace WPEFramework {
 namespace Plugin {
@@ -104,6 +106,8 @@ namespace Plugin {
         UpdateCache();
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
+
+        printf("Test Coverity %s \n");
 
         return Core::ERROR_NONE;
     }
