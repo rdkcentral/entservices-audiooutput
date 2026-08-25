@@ -292,14 +292,7 @@ jobs:
           /usr/include/libdrm/drm.h
           /usr/include/libdrm/drm_mode.h
           /usr/include/xf86drm.h
-          . &&
-          mkdir -p "$GITHUB_WORKSPACE/ci-ds"
-          &&
-          printf '%s\n'
-          'set(DS_FOUND TRUE)'
-          "set(DS_INCLUDE_DIRS \"$GITHUB_WORKSPACE/entservices-testframework/Tests/headers\")"
-          'set(DS_LIBRARIES "")'
-          > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake"
+          .
 
       # Select toolchain file based on matrix (clang, gcc+coverage, gcc+no-coverage)
       - name: Set clang toolchain
@@ -413,7 +406,7 @@ jobs:
           -B build/entservices-audiooutput
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DUSE_THUNDER_R4=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
@@ -501,7 +494,7 @@ jobs:
           -B build/entservices-testframework
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DCMAKE_CXX_FLAGS="
           -fprofile-arcs
@@ -570,9 +563,9 @@ jobs:
       - name: Run unit tests with valgrind
         if: ${{ !env.ACT && env.RDK_SERVICES_L1_TEST == 'ON' && inputs.caller_source != 'testframework' }}
         run: >
-          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
-          export GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json" &&
+          PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
+          GTEST_OUTPUT="json:$(pwd)/rdkL1TestResults.json" &&
           valgrind
           --tool=memcheck
           --log-file=valgrind_log
@@ -580,7 +573,7 @@ jobs:
           --show-reachable=yes
           --track-fds=yes
           --fair-sched=try
-          "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL1Test" &&
+          RdkServicesL1Test &&
           cp -rf $(pwd)/rdkL1TestResults.json $GITHUB_WORKSPACE/rdkL1TestResultsWithValgrind.json &&
           rm -rf $(pwd)/rdkL1TestResults.json
 
