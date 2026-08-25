@@ -18,22 +18,6 @@ jobs:
       - name: native build
         run: |
           sh -x build_dependencies.sh
-
-          # Backup the original FindDS.cmake
-          cp "$GITHUB_WORKSPACE/cmake/FindDS.cmake" \
-             "$GITHUB_WORKSPACE/cmake/FindDS.cmake.backup"
-
-          # Always restore the original file when this step exits
-          trap 'mv "$GITHUB_WORKSPACE/cmake/FindDS.cmake.backup" "$GITHUB_WORKSPACE/cmake/FindDS.cmake"' EXIT
-
-          # CI-only mock DS package
-          cat > "$GITHUB_WORKSPACE/cmake/FindDS.cmake" <<'EOF'
-          set(DS_FOUND TRUE)
-          set(DS_INCLUDE_DIRS
-              "${CMAKE_SOURCE_DIR}/entservices-testframework/Tests/headers/rdk/ds"
-          )
-          set(DS_LIBRARIES "")
-          EOF
           sh -x cov_build.sh
         env:
           GITHUB_TOKEN: ${{ secrets.RDKCM_RDKE }}

@@ -334,14 +334,7 @@ jobs:
           /usr/include/libdrm/drm.h
           /usr/include/libdrm/drm_mode.h
           /usr/include/xf86drm.h
-          . &&
-          mkdir -p "$GITHUB_WORKSPACE/ci-ds"
-          &&
-          printf '%s\n'
-          'set(DS_FOUND TRUE)'
-          "set(DS_INCLUDE_DIRS \"$GITHUB_WORKSPACE/entservices-testframework/Tests/headers\")"
-          'set(DS_LIBRARIES "")'
-          > "$GITHUB_WORKSPACE/ci-ds/FindDS.cmake"
+          .
       - name: Set clang toolchain
         if: ${{ matrix.compiler == 'clang' }}
         run: echo "TOOLCHAIN_FILE=$GITHUB_WORKSPACE/entservices-testframework/Tests/clang.cmake" >> $GITHUB_ENV
@@ -436,7 +429,7 @@ jobs:
           -B build/entservices-audiooutput
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DUSE_THUNDER_R4=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
@@ -516,7 +509,7 @@ jobs:
           -B build/entservices-testframework
           -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
           -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
-          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/ci-ds;$GITHUB_WORKSPACE/install/tools/cmake"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
           -DCMAKE_CXX_FLAGS="
           -DEXCEPTIONS_ENABLE=ON
@@ -612,19 +605,19 @@ jobs:
 
       - name: Run unit tests without valgrind
         run: >
-          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
-          export GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" &&
-          "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL2Test" &&
+          PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
+          GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" &&
+          RdkServicesL1Test &&
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithoutValgrind.json &&
           rm -rf $(pwd)/rdkL2TestResults.json
 
       - name: Run unit tests with valgrind
         if: ${{ !env.ACT && inputs.caller_source != 'testframework' }}
         run: >
-          export PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
-          export GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" &&
+          PATH="$GITHUB_WORKSPACE/install/usr/bin:${PATH}" &&
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/install/usr/lib:$GITHUB_WORKSPACE/install/usr/lib/wpeframework/plugins:${LD_LIBRARY_PATH}" &&
+          GTEST_OUTPUT="json:$(pwd)/rdkL2TestResults.json" &&
           valgrind
           --tool=memcheck
           --log-file=valgrind_log
@@ -632,7 +625,7 @@ jobs:
           --show-reachable=yes
           --track-fds=yes
           --fair-sched=try
-          "$GITHUB_WORKSPACE/install/usr/bin/RdkServicesL2Test" &&
+          RdkServicesL1Test &&
           cp -rf $(pwd)/rdkL2TestResults.json $GITHUB_WORKSPACE/rdkL2TestResultsWithValgrind.json &&
           rm -rf $(pwd)/rdkL2TestResults.json
 
