@@ -23,6 +23,7 @@
 #include <interfaces/Ids.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IConfiguration.h>
+#include <interfaces/IHdmiCecSink.h>
 
 #include <com/com.h>
 #include <core/core.h>
@@ -59,6 +60,32 @@ namespace Plugin {
 
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
+
+    private:
+        class HdmiCecSinkNotification : public Exchange::IHdmiCecSink::INotification {
+        private:
+            HdmiCecSinkNotification(const HdmiCecSinkNotification&) = delete;
+            HdmiCecSinkNotification& operator=(const HdmiCecSinkNotification&) = delete;
+
+        public:
+            explicit HdmiCecSinkNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~HdmiCecSinkNotification() override = default;
+
+            BEGIN_INTERFACE_MAP(HdmiCecSinkNotification)
+            INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
+            END_INTERFACE_MAP
+
+            void ArcInitiationEvent(const string status) override
+            {
+                _parent.onArcInitiationEvent(status);
+            }
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
 
     private:
         class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
@@ -109,6 +136,7 @@ namespace Plugin {
         void unregisterDsEventHandlers();
         void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
         void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
+        void onArcInitiationEvent(const string& status);
 
     private:
         mutable Core::CriticalSection _adminLock;
@@ -128,6 +156,10 @@ namespace Plugin {
         // DS HAL event listener
         DsAudioPortNotification _dsAudioPortNotification{*this};
         bool _registeredDsEventHandlers{false};
+
+        // HdmiCecSink event listener
+        Exchange::IHdmiCecSink* _hdmiCecSink{nullptr};
+        HdmiCecSinkNotification _hdmiCecSinkNotification{*this};
     };
 
 } // namespace Plugin

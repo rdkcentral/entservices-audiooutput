@@ -62,6 +62,12 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation Destructor");
 
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Unregister(&_hdmiCecSinkNotification);
+            _hdmiCecSink->Release();
+            _hdmiCecSink = nullptr;
+        }
+
         try {
             unregisterDsEventHandlers();
             device::Manager::DeInitialize();
@@ -104,6 +110,14 @@ namespace Plugin {
         UpdateCache();
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
+
+        _hdmiCecSink = service->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Register(&_hdmiCecSinkNotification);
+            LOGINFO("AudioOutputImplementation::Configure: registered for HdmiCecSink ArcInitiationEvent");
+        } else {
+            LOGWARN("AudioOutputImplementation::Configure: HdmiCecSink not available, ArcInitiationEvent will not be received");
+        }
 
         return Core::ERROR_NONE;
     }
@@ -284,6 +298,29 @@ namespace Plugin {
                 
      	_adminLock.Lock();
         _atmosMetaData = (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
+        _adminLock.Unlock();
+
+        UpdateCache();
+    }
+
+    // -------------------------------------------------------------------------
+    // onArcInitiationEvent
+    // HdmiCecSink callback: re-query AtmosMetadata and refresh the cache
+    // -------------------------------------------------------------------------
+
+    void AudioOutputImplementation::onArcInitiationEvent(const string& status)
+    {
+        LOGINFO("AudioOutputImplementation::onArcInitiationEvent: status=%s", status.c_str());
+
+        bool cap = false;
+        if (AtmosMetadata(cap) != Core::ERROR_NONE) {
+            LOGERR("onArcInitiationEvent: AtmosMetadata query failed");
+            return;
+        }
+
+        _atmosMetadataInitFailed = false;
+        _adminLock.Lock();
+        _atmosMetaData = cap;
         _adminLock.Unlock();
 
         UpdateCache();
