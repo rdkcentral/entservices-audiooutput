@@ -68,9 +68,10 @@ namespace Plugin {
             HdmiCecSinkNotification& operator=(const HdmiCecSinkNotification&) = delete;
 
         public:
-            explicit HdmiCecSinkNotification(AudioOutputImplementation& parent)
-                : _parent(parent)
+            explicit HdmiCecSinkNotification(AudioOutputImplementation* parent)
+                : _parent(*parent)
             {
+                ASSERT(parent != nullptr);
             }
             ~HdmiCecSinkNotification() override = default;
 
@@ -159,7 +160,7 @@ namespace Plugin {
 
         // HdmiCecSink event listener
         Exchange::IHdmiCecSink* _hdmiCecSink{nullptr};
-        HdmiCecSinkNotification _hdmiCecSinkNotification{*this};
+        Core::Sink<HdmiCecSinkNotification> _hdmiCecSinkNotification;
     };
 
 } // namespace Plugin

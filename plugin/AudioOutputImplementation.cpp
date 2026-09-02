@@ -46,6 +46,7 @@ namespace Plugin {
     // -------------------------------------------------------------------------
 
     AudioOutputImplementation::AudioOutputImplementation()
+        : _hdmiCecSinkNotification(this)
     {
         LOGINFO("AudioOutputImplementation Constructor");
 
