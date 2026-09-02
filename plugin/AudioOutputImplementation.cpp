@@ -206,8 +206,9 @@ namespace Plugin {
 
     }
 
-    Core::hresult  AudioOutputImplementation::GetAudioConfig(const std::string& audioConfig, bool &enable /* @out */) const
+    Core::hresult AudioOutputImplementation::GetAudioConfig(const std::string& audioConfig, bool& enable /* @out */) const
     {
+        enable = false;
         LOGINFO("Get %s audio configuration", audioConfig.c_str());
         try
         {
