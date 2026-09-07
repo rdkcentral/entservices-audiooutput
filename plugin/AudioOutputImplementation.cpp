@@ -115,9 +115,9 @@ namespace Plugin {
         _hdmiCecSink = service->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
         if (_hdmiCecSink != nullptr) {
             _hdmiCecSink->Register(&_hdmiCecSinkNotification);
-            LOGINFO("AudioOutputImplementation::Configure: registered for HdmiCecSink ArcInitiationEvent");
+            LOGINFO("AudioOutputImplementation::Configure: registered for HdmiCecSink ReportAudioDeviceConnectedStatus");
         } else {
-            LOGWARN("AudioOutputImplementation::Configure: HdmiCecSink not available, ArcInitiationEvent will not be received");
+            LOGWARN("AudioOutputImplementation::Configure: HdmiCecSink not available, ReportAudioDeviceConnectedStatus will not be received");
         }
 
         return Core::ERROR_NONE;
@@ -305,17 +305,17 @@ namespace Plugin {
     }
 
     // -------------------------------------------------------------------------
-    // onArcInitiationEvent
+    // onReportAudioDeviceConnectedStatus
     // HdmiCecSink callback: re-query AtmosMetadata and refresh the cache
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::onArcInitiationEvent(const string& status)
+    void AudioOutputImplementation::onReportAudioDeviceConnectedStatus(const string& status, const string& audioDeviceConnected)
     {
-        LOGINFO("AudioOutputImplementation::onArcInitiationEvent: status=%s", status.c_str());
+        LOGINFO("AudioOutputImplementation::onReportAudioDeviceConnectedStatus: status=%s, audioDeviceConnected=%s", status.c_str(), audioDeviceConnected.c_str());
 
         bool cap = false;
         if (AtmosMetadata(cap) != Core::ERROR_NONE) {
-            LOGERR("onArcInitiationEvent: AtmosMetadata query failed");
+            LOGERR("onReportAudioDeviceConnectedStatus: AtmosMetadata query failed");
             return;
         }
 

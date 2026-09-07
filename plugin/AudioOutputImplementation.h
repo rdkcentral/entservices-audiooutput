@@ -79,9 +79,9 @@ namespace Plugin {
             INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
             END_INTERFACE_MAP
 
-            void ArcInitiationEvent(const string status) override
+            void ReportAudioDeviceConnectedStatus(const string status, const string audioDeviceConnected) override
             {
-                _parent.onArcInitiationEvent(status);
+                _parent.onReportAudioDeviceConnectedStatus(status, audioDeviceConnected);
             }
 
         private:
@@ -137,7 +137,7 @@ namespace Plugin {
         void unregisterDsEventHandlers();
         void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
         void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
-        void onArcInitiationEvent(const string& status);
+        void onReportAudioDeviceConnectedStatus(const string& status, const string& audioDeviceConnected);
 
     private:
         mutable Core::CriticalSection _adminLock;
