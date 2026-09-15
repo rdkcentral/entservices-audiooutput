@@ -226,6 +226,7 @@ namespace Plugin {
 
     Core::hresult AudioOutputImplementation::GetSupportedAudioConfigs(Exchange::IAudioOutput::IAudioConfigListIterator*&  audioConfigs) const
     {
+        audioConfigs = nullptr;
         std::vector<std::string> configList;
         try
         {

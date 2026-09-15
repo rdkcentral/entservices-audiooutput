@@ -281,6 +281,117 @@ uint32_t AudioOutputL2Test::CreateAudioOutputInterfaceObjectUsingComRPCConnectio
     return Core::ERROR_GENERAL;
 }
 
+// ===========================================================================
+// Application audio configuration APIs
+// ===========================================================================
+
+TEST_F(AudioOutputL2Test, ComRpc_SetAudioConfig_ValidAndBoundaryInputs_ReturnsSuccess)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    EXPECT_CALL(*p_hostImplMock, setApplicationAudioConfig("", false)).Times(1);
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetAudioConfig("", false));
+
+    const std::string maximumName = "CONTINUOUS_AUDIO_OUTPUT";
+    EXPECT_CALL(*p_hostImplMock, setApplicationAudioConfig(maximumName, true)).Times(1);
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetAudioConfig(maximumName, true));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetAudioConfig_DependencyException_ReturnsErrorGeneral)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    EXPECT_CALL(*p_hostImplMock, setApplicationAudioConfig(_, true))
+        .WillOnce(Throw(device::Exception("set audio config failed")));
+
+    EXPECT_EQ(Core::ERROR_GENERAL,
+              mAudioOutputPlugin->SetAudioConfig("CAO", true));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetAudioConfig_ReturnsBothBooleanStates)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    bool enabled = false;
+    EXPECT_CALL(*p_hostImplMock, getApplicationAudioConfig("", _))
+        .WillOnce([](const std::string&, bool* value) { *value = true; });
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetAudioConfig("", enabled));
+    EXPECT_TRUE(enabled);
+
+    enabled = true;
+    const std::string maximumName = "CONTINUOUS_AUDIO_OUTPUT";
+    EXPECT_CALL(*p_hostImplMock, getApplicationAudioConfig(maximumName, _))
+        .WillOnce([](const std::string&, bool* value) { *value = false; });
+    EXPECT_EQ(Core::ERROR_NONE,
+              mAudioOutputPlugin->GetAudioConfig(maximumName, enabled));
+    EXPECT_FALSE(enabled);
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetAudioConfig_DependencyException_ResetsOutput)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    bool enabled = true;
+    EXPECT_CALL(*p_hostImplMock, getApplicationAudioConfig("CONTINUOUS_AUDIO_OUTPUT", _))
+        .WillOnce(Throw(device::Exception("get audio config failed")));
+
+    EXPECT_EQ(Core::ERROR_GENERAL,
+              mAudioOutputPlugin->GetAudioConfig("CONTINUOUS_AUDIO_OUTPUT", enabled));
+    EXPECT_FALSE(enabled);
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetSupportedAudioConfigs_ReturnsEmptyAndPopulatedIterators)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    EXPECT_CALL(*p_hostImplMock, getApplicationAudioConfigList(_))
+        .WillOnce([](std::vector<std::string>& configs) { configs.clear(); });
+
+    Exchange::IAudioOutput::IAudioConfigListIterator* audioConfigs = nullptr;
+    EXPECT_EQ(Core::ERROR_NONE,
+              mAudioOutputPlugin->GetSupportedAudioConfigs(audioConfigs));
+    ASSERT_NE(audioConfigs, nullptr);
+    std::string config;
+    EXPECT_FALSE(audioConfigs->Next(config));
+    audioConfigs->Release();
+
+    EXPECT_CALL(*p_hostImplMock, getApplicationAudioConfigList(_))
+        .WillOnce([](std::vector<std::string>& configs) {
+            configs = {"CONTINUOUS_AUDIO_OUTPUT", "EXAMPLE_AUDIO_CONFIG"};
+        });
+
+    audioConfigs = nullptr;
+    EXPECT_EQ(Core::ERROR_NONE,
+              mAudioOutputPlugin->GetSupportedAudioConfigs(audioConfigs));
+    ASSERT_NE(audioConfigs, nullptr);
+    std::vector<std::string> returnedConfigs;
+    while (audioConfigs->Next(config)) {
+        returnedConfigs.push_back(config);
+    }
+    EXPECT_EQ(returnedConfigs,
+              (std::vector<std::string>{"CONTINUOUS_AUDIO_OUTPUT", "EXAMPLE_AUDIO_CONFIG"}));
+    audioConfigs->Release();
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetSupportedAudioConfigs_DependencyException_ReturnsNullOutput)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    EXPECT_CALL(*p_hostImplMock, getApplicationAudioConfigList(_))
+        .WillOnce(Throw(device::Exception("list audio configs failed")));
+
+    Exchange::IAudioOutput::IAudioConfigListIterator* audioConfigs = nullptr;
+    EXPECT_EQ(Core::ERROR_GENERAL,
+              mAudioOutputPlugin->GetSupportedAudioConfigs(audioConfigs));
+    EXPECT_EQ(audioConfigs, nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // AudioOutputL2Test_AtmosCapable
 //
