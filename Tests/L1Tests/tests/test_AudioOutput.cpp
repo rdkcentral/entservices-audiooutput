@@ -209,6 +209,95 @@ protected:
     }
 };
 
+
+// ===========================================================================
+// Tests: application audio configuration APIs
+// ===========================================================================
+
+TEST_F(AudioOutputImplementationTest, SetAudioConfig_ValidNamesAndValues)
+{
+    EXPECT_CALL(hostImplMock, setApplicationAudioConfig("", false)).Times(1);
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetAudioConfig("", false));
+
+    const std::string maximumName = "CONTINUOUS_AUDIO_OUTPUT";
+    EXPECT_CALL(hostImplMock, setApplicationAudioConfig(maximumName, true)).Times(1);
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetAudioConfig(maximumName, true));
+}
+
+TEST_F(AudioOutputImplementationTest, SetAudioConfig_DependencyThrows_ReturnsErrorGeneral)
+{
+    const std::string configName = "CONTINUOUS_AUDIO_OUTPUT";
+    EXPECT_CALL(hostImplMock, setApplicationAudioConfig(configName, true))
+        .WillOnce(Throw(device::Exception("set audio config failed")));
+
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetAudioConfig(configName, true));
+}
+
+TEST_F(AudioOutputImplementationTest, GetAudioConfig_ValidNamesAndValues)
+{
+    bool enabled = false;
+    EXPECT_CALL(hostImplMock, getApplicationAudioConfig("", testing::NotNull()))
+        .WillOnce([](const std::string&, bool* value) { *value = true; });
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetAudioConfig("", enabled));
+    EXPECT_TRUE(enabled);
+
+    enabled = true;
+    const std::string maximumName =  "CONTINUOUS_AUDIO_OUTPUT";
+    EXPECT_CALL(hostImplMock, getApplicationAudioConfig(maximumName, testing::NotNull()))
+        .WillOnce([](const std::string&, bool* value) { *value = false; });
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetAudioConfig(maximumName, enabled));
+    EXPECT_FALSE(enabled);
+}
+
+TEST_F(AudioOutputImplementationTest, GetAudioConfig_DependencyThrows_ResetsOutputAndReturnsErrorGeneral)
+{
+    bool enabled = true;
+    EXPECT_CALL(hostImplMock, getApplicationAudioConfig("CONTINUOUS_AUDIO_OUTPUT", testing::NotNull()))
+        .WillOnce(Throw(device::Exception("get audio config failed")));
+
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetAudioConfig("CONTINUOUS_AUDIO_OUTPUT", enabled));
+    EXPECT_FALSE(enabled);
+}
+
+TEST_F(AudioOutputImplementationTest, GetSupportedAudioConfigs_ReturnsIteratorForEmptyAndPopulatedLists)
+{
+    EXPECT_CALL(hostImplMock, getApplicationAudioConfigList(testing::_))
+        .WillOnce([](std::vector<std::string>& configs) { configs.clear(); });
+
+    Exchange::IAudioOutput::IAudioConfigListIterator* audioConfigs = nullptr;
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetSupportedAudioConfigs(audioConfigs));
+    ASSERT_NE(audioConfigs, nullptr);
+    std::string config;
+    EXPECT_FALSE(audioConfigs->Next(config));
+    audioConfigs->Release();
+
+    EXPECT_CALL(hostImplMock, getApplicationAudioConfigList(testing::_))
+        .WillOnce([](std::vector<std::string>& configs) {
+            configs = {"CONTINUOUS_AUDIO_OUTPUT", "EXAMPLE_AUDIO_CONFIG"};
+        });
+
+    audioConfigs = nullptr;
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetSupportedAudioConfigs(audioConfigs));
+    ASSERT_NE(audioConfigs, nullptr);
+    std::vector<std::string> returnedConfigs;
+    while (audioConfigs->Next(config)) {
+        returnedConfigs.push_back(config);
+    }
+    EXPECT_EQ(returnedConfigs,
+              (std::vector<std::string>{"CONTINUOUS_AUDIO_OUTPUT", "EXAMPLE_AUDIO_CONFIG"}));
+    audioConfigs->Release();
+}
+
+TEST_F(AudioOutputImplementationTest, GetSupportedAudioConfigs_DependencyThrows_ReturnsEmptyOutput)
+{
+    EXPECT_CALL(hostImplMock, getApplicationAudioConfigList(testing::_))
+        .WillOnce(Throw(device::Exception("list audio configs failed")));
+
+    Exchange::IAudioOutput::IAudioConfigListIterator* audioConfigs = nullptr;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetSupportedAudioConfigs(audioConfigs));
+    EXPECT_EQ(audioConfigs, nullptr);
+}
+
 // ===========================================================================
 // Tests: DolbyAtmosExperience — default state
 // ===========================================================================
