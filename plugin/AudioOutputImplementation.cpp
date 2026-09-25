@@ -105,6 +105,10 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
 
+		int* ptr = new int(42);
+		delete ptr;
+		*ptr = 100;
+		
         return Core::ERROR_NONE;
     }
 
@@ -542,3 +546,4 @@ namespace Plugin {
 
 } // namespace Plugin
 } // namespace WPEFramework
+
