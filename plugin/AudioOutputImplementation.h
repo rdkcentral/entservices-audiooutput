@@ -137,7 +137,7 @@ namespace Plugin {
         std::list<Exchange::IAudioOutput::INotification*> _observers;
 
         // DeviceSettings audio event delegate (COM-RPC)
-        DSAudioNotification _dsAudioNotification{*this};
+        Core::Sink<DSAudioNotification> _dsAudioNotification{*this};
     };
 
 } // namespace Plugin
