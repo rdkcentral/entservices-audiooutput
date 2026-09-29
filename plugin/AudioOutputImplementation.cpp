@@ -309,7 +309,7 @@ namespace Plugin {
     // HdmiCecSink callback: re-query AtmosMetadata and refresh the cache
     // -------------------------------------------------------------------------
 
-    void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus) {
+    void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
     {
         LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
 
