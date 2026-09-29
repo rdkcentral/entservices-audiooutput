@@ -311,7 +311,7 @@ namespace Plugin {
 
     void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus) {
     {
-        LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d, powerStatus);
+        LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
 
         bool cap = false;
         if (AtmosMetadata(cap) != Core::ERROR_NONE) {
