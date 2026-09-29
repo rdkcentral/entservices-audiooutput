@@ -25,14 +25,6 @@
 #include "UtilsLogging.h"
 #include "UtilsSearchRDKProfile.h"
 
-// libds is retained ONLY for the application-audio-config trio
-// (setApplicationAudioConfig / getApplicationAudioConfig / getApplicationAudioConfigList),
-// which has no DeviceSettings COM-RPC equivalent. All Dolby Atmos capability and
-// sound-mode logic is served over COM-RPC via DSHelper.
-#include "host.hpp"
-#include "manager.hpp"
-#include "exception.hpp"
-
 namespace WPEFramework {
 namespace Plugin {
 
@@ -47,14 +39,6 @@ namespace Plugin {
     AudioOutputImplementation::AudioOutputImplementation()
     {
         LOGINFO("AudioOutputImplementation Constructor");
-
-        // libds init is required only for the application-audio-config path.
-        try {
-            device::Manager::Initialize();
-            LOGINFO("device::Manager::Initialize success");
-        } catch (const device::Exception& err) {
-            LOGWARN("device::Manager::Initialize failed : {%s}", err.what());
-        }
     }
 
     AudioOutputImplementation::~AudioOutputImplementation()
@@ -68,13 +52,6 @@ namespace Plugin {
             audio->Release();
         }
         DSHelper::Close();
-
-        try {
-            device::Manager::DeInitialize();
-            LOGINFO("device::Manager::DeInitialize success");
-        } catch (const device::Exception& err) {
-            LOGWARN("device::Manager::DeInitialize failed: {%s}", err.what());
-        }
     }
 
     // -------------------------------------------------------------------------
@@ -197,58 +174,83 @@ namespace Plugin {
         return Core::ERROR_NONE;
     }
 
+    // -------------------------------------------------------------------------
+    // IAudioOutput::SetAudioConfig / GetAudioConfig / GetSupportedAudioConfigs (COM-RPC)
+    // Delegates to IDeviceSettingsAudio::SetApplicationAudioConfig / GetApplicationAudioConfig /
+    // GetApplicationAudioConfigList. The handle is unused by the underlying HAL call (mirrors
+    // the original libds Host::setApplicationAudioConfig(NULL, ...) semantics), so 0 is passed.
+    // -------------------------------------------------------------------------
+
     Core::hresult AudioOutputImplementation::SetAudioConfig(const std::string& audioConfig, const bool enable)
     {
         LOGINFO("Set %s audio configuration to enable = %s", audioConfig.c_str(), enable ? "true" : "false");
-        try
-        {
-            device::Host::getInstance().setApplicationAudioConfig(audioConfig, enable);
-        }
-        catch (const device::Exception& err)
-        {
-            LOGERR("Exception during DeviceSetting library call. code = %d message = %s", err.getCode(), err.what());
-            return Core::ERROR_GENERAL;
-        }
-        return (Core::ERROR_NONE);
 
+        auto* audio = AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        if (audio == nullptr) {
+            LOGERR("SetAudioConfig: IDeviceSettingsAudio unavailable");
+            return Core::ERROR_UNAVAILABLE;
+        }
+
+        const Core::hresult result = audio->SetApplicationAudioConfig(0, audioConfig, enable);
+        audio->Release();
+        if (result != Core::ERROR_NONE) {
+            LOGERR("SetAudioConfig: SetApplicationAudioConfig failed: %u", result);
+        }
+        return result;
     }
 
     Core::hresult AudioOutputImplementation::GetAudioConfig(const std::string& audioConfig, bool& enable /* @out */) const
     {
         enable = false;
         LOGINFO("Get %s audio configuration", audioConfig.c_str());
-        try
-        {
-            device::Host::getInstance().getApplicationAudioConfig(audioConfig, &enable);
+        auto* audio = const_cast<AudioOutputImplementation*>(this)
+                          ->AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        if (audio == nullptr) {
+            LOGERR("GetAudioConfig: IDeviceSettingsAudio unavailable");
+            return Core::ERROR_UNAVAILABLE;
+        }
+
+        const Core::hresult result = audio->GetApplicationAudioConfig(0, audioConfig, enable);
+        audio->Release();
+        if (result != Core::ERROR_NONE) {
+            LOGERR("GetAudioConfig: GetApplicationAudioConfig failed: %u", result);
+        } else {
             LOGINFO("%s audio config enabled = %s", audioConfig.c_str(), enable ? "true" : "false");
         }
-        catch (const device::Exception& err)
-        {
-            LOGERR("Exception during DeviceSetting library call. code = %d message = %s", err.getCode(), err.what());
-           return Core::ERROR_GENERAL;
-        }
-        return (Core::ERROR_NONE);
-
+        return result;
     }
 
     Core::hresult AudioOutputImplementation::GetSupportedAudioConfigs(Exchange::IAudioOutput::IAudioConfigListIterator*&  audioConfigs) const
     {
         audioConfigs = nullptr;
+
+		auto* audio = const_cast<AudioOutputImplementation*>(this)
+                          ->AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        if (audio == nullptr) {
+            LOGERR("GetSupportedAudioConfigs: IDeviceSettingsAudio unavailable");
+            return Core::ERROR_UNAVAILABLE;
+        }
+
+        Exchange::IDeviceSettingsAudio::IDeviceSettingsAudioApplicationConfigIterator* dsConfigs = nullptr;
+        const Core::hresult result = audio->GetApplicationAudioConfigList(0, dsConfigs);
+        audio->Release();
+        if (result != Core::ERROR_NONE) {
+            LOGERR("GetSupportedAudioConfigs: GetApplicationAudioConfigList failed: %u", result);
+            return result;
+        }
+		
         std::vector<std::string> configList;
-        try
-        {
-           device::Host::getInstance().getApplicationAudioConfigList(configList);
-           for (const auto& config : configList) {
-               LOGINFO("audio config = %s", config.c_str());
-           }
+        if (dsConfigs != nullptr) {
+            Exchange::IDeviceSettingsAudio::ApplicationAudioConfig entry;
+            while (dsConfigs->Next(entry)) {
+                LOGINFO("audio config = %s", entry.configName.c_str());
+                configList.push_back(entry.configName);
+            }
+            dsConfigs->Release();
         }
-        catch (const device::Exception& err)
-        {
-             LOGERR("Exception during DeviceSetting library call. code = %d message = %s", err.getCode(), err.what());
-             return Core::ERROR_GENERAL;
-        }
+
         audioConfigs = (Core::Service<RPC::IteratorType<Exchange::IAudioOutput::IAudioConfigListIterator>>::Create<Exchange::IAudioOutput::IAudioConfigListIterator>(configList));
-        return (Core::ERROR_NONE);
+        return Core::ERROR_NONE;
     }
 
     // -------------------------------------------------------------------------
