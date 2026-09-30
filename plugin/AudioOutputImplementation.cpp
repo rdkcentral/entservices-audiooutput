@@ -48,8 +48,14 @@ namespace Plugin {
         // Unregister the DS audio notification before the COM-RPC link is closed.
         auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio != nullptr) {
-            audio->Unregister(&_dsAudioNotification);
+            const uint32_t unregResult = audio->Unregister(&_dsAudioNotification);
+            LOGINFO("~AudioOutputImplementation: audio->Unregister() returned %u", unregResult);
+            if (unregResult != Core::ERROR_NONE) {
+                LOGWARN("~AudioOutputImplementation: audio->Unregister() returned non-zero: %u", unregResult);
+            }
             audio->Release();
+        } else {
+            LOGWARN("~AudioOutputImplementation: Cannot unregister — IDeviceSettingsAudio unavailable");
         }
         DSHelper::Close();
     }
@@ -64,9 +70,12 @@ namespace Plugin {
 
         // Open the COM-RPC link to the DeviceSettings plugin. If DeviceSettings is
         // already active, OnDeviceSettingsActivated() fires synchronously here.
+		LOGINFO("Configure: Opening DeviceSettings COM-RPC link for AudioOutput plugin");
         const uint32_t result = DSHelper::Open(service, "AudioOutput");
         if (result != Core::ERROR_NONE) {
-            LOGERR("Configure: failed to open DeviceSettings link (result=%u)", result);
+            LOGERR("Configure: DSHelper::Open() failed with result=%u — audio events will NOT work", result);
+        } else {
+            LOGINFO("Configure: DSHelper::Open() succeeded");
         }
         return Core::ERROR_NONE;
     }
@@ -81,18 +90,31 @@ namespace Plugin {
 
         auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio != nullptr) {
-            audio->Register("AudioOutput", &_dsAudioNotification);
+            // Register the notification delegate for audio events (OnAudioModeEvent, OnDolbyAtmosCapabilitiesChanged, etc.)
+            const uint32_t regResult = audio->Register("AudioOutput", &_dsAudioNotification);
+            LOGINFO("OnDeviceSettingsActivated: audio->Register() returned %u (ERROR_NONE=%u)",
+                    regResult, Core::ERROR_NONE);
+            if (regResult != Core::ERROR_NONE) {
+                LOGERR("OnDeviceSettingsActivated: audio->Register() FAILED with error %u — events will NOT be delivered",
+                       regResult);
+            }
             audio->Release();
         } else {
-            LOGWARN("OnDeviceSettingsActivated: IDeviceSettingsAudio unavailable for Register");
+            LOGERR("OnDeviceSettingsActivated: IDeviceSettingsAudio unavailable for Register — NO EVENTS will be received");
         }
 
         // Prime the cache now that DeviceSettings is guaranteed active.
         bool cap = false;
         _atmosMetadataInitFailed = (AtmosMetadata(cap) != Core::ERROR_NONE);
+		if (_atmosMetadataInitFailed) {
+            LOGWARN("OnDeviceSettingsActivated: AtmosMetadata() query failed at init");
+        }
 
         Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
         _soundModeInitFailed = (SoundMode(mode) != Core::ERROR_NONE);
+		if (_soundModeInitFailed) {
+            LOGWARN("OnDeviceSettingsActivated: SoundMode() query failed at init");
+        }
 
         _adminLock.Lock();
         _atmosMetaData = cap;
@@ -100,8 +122,11 @@ namespace Plugin {
         _adminLock.Unlock();
 
         UpdateCache();
-        LOGINFO("AudioOutputImplementation::OnDeviceSettingsActivated: dolbyAtmosExperience=%s",
-                _dolbyAtmosExperience ? "true" : "false");
+        LOGINFO("AudioOutputImplementation::OnDeviceSettingsActivated COMPLETE: "
+                "dolbyAtmosExperience=%s, soundMode=%d (atmosFailed=%s, soundModeFailed=%s)",
+                _dolbyAtmosExperience ? "true" : "false", mode,
+                _atmosMetadataInitFailed ? "yes" : "no",
+                _soundModeInitFailed ? "yes" : "no");
     }
 
     void AudioOutputImplementation::OnDeviceSettingsDeactivated()
