@@ -46,7 +46,7 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation Destructor");
 
         // Unregister the DS audio notification before the COM-RPC link is closed.
-        auto* audio = AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio != nullptr) {
             audio->Unregister(&_dsAudioNotification);
             audio->Release();
@@ -79,7 +79,7 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation: OnDeviceSettingsActivated — registering DS audio notification");
 
-        auto* audio = AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio != nullptr) {
             audio->Register("AudioOutput", &_dsAudioNotification);
             audio->Release();
@@ -185,7 +185,7 @@ namespace Plugin {
     {
         LOGINFO("Set %s audio configuration to enable = %s", audioConfig.c_str(), enable ? "true" : "false");
 
-        auto* audio = AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio == nullptr) {
             LOGERR("SetAudioConfig: IDeviceSettingsAudio unavailable");
             return Core::ERROR_UNAVAILABLE;
@@ -203,8 +203,7 @@ namespace Plugin {
     {
         enable = false;
         LOGINFO("Get %s audio configuration", audioConfig.c_str());
-        auto* audio = const_cast<AudioOutputImplementation*>(this)
-                          ->AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio == nullptr) {
             LOGERR("GetAudioConfig: IDeviceSettingsAudio unavailable");
             return Core::ERROR_UNAVAILABLE;
@@ -224,8 +223,7 @@ namespace Plugin {
     {
         audioConfigs = nullptr;
 
-		auto* audio = const_cast<AudioOutputImplementation*>(this)
-                          ->AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+		auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio == nullptr) {
             LOGERR("GetSupportedAudioConfigs: IDeviceSettingsAudio unavailable");
             return Core::ERROR_UNAVAILABLE;
@@ -399,16 +397,15 @@ namespace Plugin {
 
         supported = false;
 
-        auto* audio = const_cast<AudioOutputImplementation*>(this)
-                          ->AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio == nullptr) {
             LOGERR("AtmosMetadata: IDeviceSettingsAudio unavailable");
             return Core::ERROR_UNAVAILABLE;
         }
 
         // Cached handles populated by DSHelper on DeviceSettings activation.
-        const int32_t arcHandle  = getCachedAudioPortHandle("HDMI_ARC0");
-        const int32_t hdmiHandle = getCachedAudioPortHandle("HDMI0");
+        const int32_t arcHandle  = DSHelper::getCachedAudioPortHandle("HDMI_ARC0");
+        const int32_t hdmiHandle = DSHelper::getCachedAudioPortHandle("HDMI0");
         DolbyAtmosCapability capability = DolbyAtmosCapability::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
 
         if (TV == searchRdkProfile()) {
@@ -428,7 +425,7 @@ namespace Plugin {
                 LOGINFO("AtmosMetadata: ARC not enabled, querying TV panel ATMOS capability");
                 const int32_t selectedHandle = (hdmiHandle != INVALID_DS_HANDLE)
                                                    ? hdmiHandle
-                                                   : getCachedAudioPortHandle("SPEAKER0");
+                                                   : DSHelper::getCachedAudioPortHandle("SPEAKER0");
                 if (selectedHandle != INVALID_DS_HANDLE) {
                     audio->GetAudioSinkDeviceAtmosCapability(selectedHandle, capability);
                 } else {
@@ -499,17 +496,17 @@ namespace Plugin {
         static const size_t kPriorityCount = sizeof(kPriority) / sizeof(kPriority[0]);
 
         auto* self  = const_cast<AudioOutputImplementation*>(this);
-        auto* audio = self->AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio == nullptr) {
             LOGERR("SoundMode: IDeviceSettingsAudio unavailable");
             return Core::ERROR_UNAVAILABLE;
         }
 
         std::vector<AudioPortEntry> entries;
-        getAudioPortEntries(entries);
+        DSHelper::getAudioPortEntries(entries);
         std::vector<int32_t> handles(entries.size(), INVALID_DS_HANDLE);
         for (size_t i = 0; i < entries.size(); ++i) {
-            handles[i] = getCachedAudioPortHandle(entries[i].name);
+            handles[i] = DSHelper::getCachedAudioPortHandle(entries[i].name);
         }
 
         bool found = false;
