@@ -23,6 +23,7 @@
 #include <interfaces/Ids.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IConfiguration.h>
+#include <interfaces/IDeviceSettingsAudio.h>
 
 #include <com/com.h>
 #include <core/core.h>
@@ -30,15 +31,17 @@
 #include <list>
 #include <string>
 
-#include "host.hpp"
-#include "dsAudio.h"
+// DSHelper: single COM-RPC link to the DeviceSettings plugin (IDeviceSettings root)
+// plus all DS sub-interface headers and config-store helpers.
+#include "DeviceSettingsInterface.h"
 
 namespace WPEFramework {
 namespace Plugin {
 
     class AudioOutputImplementation
         : public Exchange::IConfiguration
-        , public Exchange::IAudioOutput {
+        , public Exchange::IAudioOutput
+        , public DSHelper {
 
     public:
         AudioOutputImplementation(const AudioOutputImplementation&) = delete;
@@ -62,44 +65,50 @@ namespace Plugin {
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
 
+    protected:
+        // DSHelper lifecycle hooks — DeviceSettings (re-)activation / deactivation
+        void OnDeviceSettingsActivated() override;
+        void OnDeviceSettingsDeactivated() override;
+
     private:
-        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
+        // DS Audio event delegate — receives DeviceSettings audio notifications over
+        // COM-RPC and forwards them to the parent implementation.
+        class DSAudioNotification : public Exchange::IDeviceSettingsAudio::INotification {
         private:
-            DsAudioPortNotification(const DsAudioPortNotification&) = delete;
-            DsAudioPortNotification& operator=(const DsAudioPortNotification&) = delete;
+            DSAudioNotification(const DSAudioNotification&) = delete;
+            DSAudioNotification& operator=(const DSAudioNotification&) = delete;
 
         public:
-            explicit DsAudioPortNotification(AudioOutputImplementation& parent)
+            explicit DSAudioNotification(AudioOutputImplementation& parent)
                 : _parent(parent)
             {
             }
-            ~DsAudioPortNotification() override = default;
+            ~DSAudioNotification() override = default;
 
-        public:
-            void OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status) override
+            void OnDolbyAtmosCapabilitiesChanged(
+                Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
+                bool status) override
             {
                 _parent.onAtmosCapabilitiesChanged(atmosCapability, status);
             }
 
-            // Stubs for other IAudioOutputPortEvents methods
-            void OnAudioOutHotPlug(dsAudioPortType_t, uint32_t, bool) override {}
-            void OnAudioFormatUpdate(dsAudioFormat_t) override {}
-            void OnAudioPortStateChanged(dsAudioPortState_t) override {}
-            void OnAssociatedAudioMixingChanged(bool) override {}
-            void OnAudioFaderControlChanged(int) override {}
-            void OnAudioPrimaryLanguageChanged(const std::string&) override {}
-            void OnAudioSecondaryLanguageChanged(const std::string&) override {}
-            void OnAudioModeEvent(dsAudioPortType_t type, dsAudioStereoMode_t smode) override
+            void OnAudioModeEvent(
+                Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
+                Exchange::IDeviceSettingsAudio::StereoMode audioMode) override
             {
-                _parent.onAudioModeChanged(type, smode);
+                _parent.onAudioModeChanged(audioPortType, audioMode);
             }
+
+            BEGIN_INTERFACE_MAP(DSAudioNotification)
+                INTERFACE_ENTRY(Exchange::IDeviceSettingsAudio::INotification)
+            END_INTERFACE_MAP
 
         private:
             AudioOutputImplementation& _parent;
         };
 
     private:
-        // HAL query helpers — logic copied from entservices-playerinfo PlatformImplementation.cpp
+        // DeviceSettings COM-RPC query helpers
         uint32_t AtmosMetadata(bool& supported) const;
         uint32_t SoundMode(Exchange::IAudioOutput::AudioModes& mode) const;
 
@@ -107,10 +116,10 @@ namespace Plugin {
 
         void SendNotify(bool dolbyAtmosExperience);
         void UpdateCache();
-        void registerDsEventHandlers();
-        void unregisterDsEventHandlers();
-        void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
-        void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
+        void onAudioModeChanged(Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
+                                Exchange::IDeviceSettingsAudio::StereoMode audioMode);
+        void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
+                                        bool status);
 
     private:
         mutable Core::CriticalSection _adminLock;
@@ -127,9 +136,8 @@ namespace Plugin {
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
 
-        // DS HAL event listener
-        DsAudioPortNotification _dsAudioPortNotification{*this};
-        bool _registeredDsEventHandlers{false};
+        // DeviceSettings audio event delegate (COM-RPC)
+        Core::Sink<DSAudioNotification> _dsAudioNotification{*this};
     };
 
 } // namespace Plugin
