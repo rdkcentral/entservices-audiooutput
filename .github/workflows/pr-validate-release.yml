@@ -18,7 +18,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.RDKCM_RDKE }}
+          # Fall back to the default GITHUB_TOKEN if RDKCM_RDKE isn't configured for this repo
+          token: ${{ secrets.RDKCM_RDKE || github.token }}
 
       - name: Validate backport_to
         env:
