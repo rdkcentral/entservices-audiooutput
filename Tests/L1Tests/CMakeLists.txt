@@ -77,7 +77,7 @@ target_include_directories(${MODULE_NAME}
 target_link_directories(${MODULE_NAME}
     PUBLIC
         ${CMAKE_INSTALL_PREFIX}/lib
-        ${CMAKE_INSTALL_PREFIX}/lib/Thunder/plugins
+        ${CMAKE_INSTALL_PREFIX}/lib/${STORAGE_DIRECTORY}/plugins
 )
 
 target_link_libraries(${MODULE_NAME}
