@@ -151,7 +151,7 @@ namespace Plugin {
 
         // Init failure flags — atomic so they need no lock
         mutable std::atomic<bool> _atmosMetadataInitFailed{false};
-        mutable std::atomic<bool> _externalArcEnabled(false);
+        mutable std::atomic<bool> _externalArcEnabled{false};
         mutable std::atomic<bool> _soundModeInitFailed{false};
 
         // Observer list
