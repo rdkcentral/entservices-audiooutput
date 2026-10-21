@@ -23,6 +23,7 @@
 #include <interfaces/Ids.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IConfiguration.h>
+#include <interfaces/IHdmiCecSink.h>
 
 #include <com/com.h>
 #include <core/core.h>
@@ -56,11 +57,38 @@ namespace Plugin {
         Core::hresult DolbyAtmosExperience(bool& enabled /* @out */) const override;
         Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
-        Core::hresult GetSupportedAudioConfigs(Exchange::IAudioOutput::IAudioConfigListIterator*& audioConfigs /* @out */)  const override;
-        Core::hresult GetAudioConfig(const std::string& audioConfig , bool& enabled /* @out */) const override;
-        Core::hresult SetAudioConfig(const std::string& audioConfig , const bool enabled) override;
+       // Core::hresult GetSupportedAudioConfigs(Exchange::IAudioOutput::IAudioConfigListIterator*& audioConfigs /* @out */)  const override;
+       // Core::hresult GetAudioConfig(const std::string& audioConfig , bool& enabled /* @out */) const override;
+      //  Core::hresult SetAudioConfig(const std::string& audioConfig , const bool enabled) override;
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
+
+    private:
+        class HdmiCecSinkNotification : public Exchange::IHdmiCecSink::INotification {
+        private:
+            HdmiCecSinkNotification(const HdmiCecSinkNotification&) = delete;
+            HdmiCecSinkNotification& operator=(const HdmiCecSinkNotification&) = delete;
+
+        public:
+            explicit HdmiCecSinkNotification(AudioOutputImplementation* parent)
+                : _parent(*parent)
+            {
+                ASSERT(parent != nullptr);
+            }
+            ~HdmiCecSinkNotification() override = default;
+
+            BEGIN_INTERFACE_MAP(HdmiCecSinkNotification)
+            INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
+            END_INTERFACE_MAP
+
+            void ReportAudioDevicePowerStatus(const int powerStatus) override
+            {
+                _parent.ReportAudioDevicePowerStatus(powerStatus);
+            }
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
 
     private:
         class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
@@ -111,6 +139,7 @@ namespace Plugin {
         void unregisterDsEventHandlers();
         void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
         void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
+        void ReportAudioDevicePowerStatus(const int powerStatus);
 
     private:
         mutable Core::CriticalSection _adminLock;
@@ -122,6 +151,7 @@ namespace Plugin {
 
         // Init failure flags — atomic so they need no lock
         mutable std::atomic<bool> _atmosMetadataInitFailed{false};
+        mutable std::atomic<bool> _externalArcEnabled{false};
         mutable std::atomic<bool> _soundModeInitFailed{false};
 
         // Observer list
@@ -130,6 +160,10 @@ namespace Plugin {
         // DS HAL event listener
         DsAudioPortNotification _dsAudioPortNotification{*this};
         bool _registeredDsEventHandlers{false};
+
+        // HdmiCecSink event listener
+        Exchange::IHdmiCecSink* _hdmiCecSink{nullptr};
+        Core::Sink<HdmiCecSinkNotification> _hdmiCecSinkNotification;
     };
 
 } // namespace Plugin

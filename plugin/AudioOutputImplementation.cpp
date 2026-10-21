@@ -46,6 +46,7 @@ namespace Plugin {
     // -------------------------------------------------------------------------
 
     AudioOutputImplementation::AudioOutputImplementation()
+        : _hdmiCecSinkNotification(this)
     {
         LOGINFO("AudioOutputImplementation Constructor");
 
@@ -61,6 +62,12 @@ namespace Plugin {
     AudioOutputImplementation::~AudioOutputImplementation()
     {
         LOGINFO("AudioOutputImplementation Destructor");
+
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Unregister(&_hdmiCecSinkNotification);
+            _hdmiCecSink->Release();
+            _hdmiCecSink = nullptr;
+        }
 
         try {
             unregisterDsEventHandlers();
@@ -104,6 +111,14 @@ namespace Plugin {
         UpdateCache();
         LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
                 _dolbyAtmosExperience ? "true" : "false");
+
+        _hdmiCecSink = service->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Register(&_hdmiCecSinkNotification);
+            LOGINFO("AudioOutputImplementation::Configure: registered for HdmiCecSink ReportAudioDevicePowerStatus notification");
+        } else {
+            LOGWARN("AudioOutputImplementation::Configure: HdmiCecSink not available, ReportAudioDevicePowerStatus will not be received");
+        }
 
         return Core::ERROR_NONE;
     }
@@ -189,7 +204,7 @@ namespace Plugin {
         _adminLock.Unlock();
         return Core::ERROR_NONE;
     }
-
+#if 0
     Core::hresult AudioOutputImplementation::SetAudioConfig(const std::string& audioConfig, const bool enable)
     {
         LOGINFO("Set %s audio configuration to enable = %s", audioConfig.c_str(), enable ? "true" : "false");
@@ -243,7 +258,7 @@ namespace Plugin {
         audioConfigs = (Core::Service<RPC::IteratorType<Exchange::IAudioOutput::IAudioConfigListIterator>>::Create<Exchange::IAudioOutput::IAudioConfigListIterator>(configList));
         return (Core::ERROR_NONE);
     }
-
+#endif
     // -------------------------------------------------------------------------
     // IAudioOutput::Register / Unregister
     // -------------------------------------------------------------------------
@@ -341,6 +356,22 @@ namespace Plugin {
         _adminLock.Unlock();
 
         UpdateCache();
+    }
+
+    // -------------------------------------------------------------------------
+    // onReportAudioDeviceConnectedStatus
+    // HdmiCecSink callback: re-query AtmosMetadata and refresh the cache
+    // -------------------------------------------------------------------------
+
+    void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
+    {
+        // when external connected device enabled during bootup, set flag to fetch new device capability instead of
+		// using cache value.
+        if (!_externalArcEnabled) {
+			LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
+		    _atmosMetadataInitFailed = true;
+			_externalArcEnabled = true;
+		}
     }
 
     // -------------------------------------------------------------------------
