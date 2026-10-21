@@ -204,7 +204,7 @@ namespace Plugin {
         _adminLock.Unlock();
         return Core::ERROR_NONE;
     }
-
+#if 0
     Core::hresult AudioOutputImplementation::SetAudioConfig(const std::string& audioConfig, const bool enable)
     {
         LOGINFO("Set %s audio configuration to enable = %s", audioConfig.c_str(), enable ? "true" : "false");
@@ -258,7 +258,7 @@ namespace Plugin {
         audioConfigs = (Core::Service<RPC::IteratorType<Exchange::IAudioOutput::IAudioConfigListIterator>>::Create<Exchange::IAudioOutput::IAudioConfigListIterator>(configList));
         return (Core::ERROR_NONE);
     }
-
+#endif
     // -------------------------------------------------------------------------
     // IAudioOutput::Register / Unregister
     // -------------------------------------------------------------------------
