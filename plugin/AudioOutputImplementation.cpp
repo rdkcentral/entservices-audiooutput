@@ -365,10 +365,10 @@ namespace Plugin {
 
     void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
     {
-        LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
         // when external connected device enabled during bootup, set flag to fetch new device capability instead of
 		// using cache value.
         if (!_externalArcEnabled) {
+			LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
 		    _atmosMetadataInitFailed = true;
 			_externalArcEnabled = true;
 		}
