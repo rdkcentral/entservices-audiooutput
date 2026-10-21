@@ -24,6 +24,7 @@
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IConfiguration.h>
 #include <interfaces/IDeviceSettingsAudio.h>
+#include <interfaces/IHdmiCecSink.h>   // add this include
 
 #include <com/com.h>
 #include <core/core.h>
@@ -57,11 +58,15 @@ namespace Plugin {
 
         // IAudioOutput
         Core::hresult DolbyAtmosExperience(bool& enabled /* @out */) const override;
+	Core::hresult SetVolumeLevel(const string& audioPort, const uint32_t& volumeLevel, bool& success /* @out */) override;
+	Core::hresult SetMuted(const string& audioPort, const bool muted, bool& success /* @out */) override;
+	Core::hresult GetVolumeLevel(const string& audioPort, string& affectedAudioPort /* @out */, int& volumeLevel /* @out */, bool& success /* @out */) override;
+	Core::hresult GetMuted(const string& audioPort, string& affectedAudioPort /* @out */, bool& muted /* @out */, bool& success /* @out */) override;
         Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
-        Core::hresult GetSupportedAudioConfigs(Exchange::IAudioOutput::IAudioConfigListIterator*& audioConfigs /* @out */)  const override;
-        Core::hresult GetAudioConfig(const std::string& audioConfig , bool& enabled /* @out */) const override;
-        Core::hresult SetAudioConfig(const std::string& audioConfig , const bool enabled) override;
+        //Core::hresult GetSupportedAudioConfigs(Exchange::IAudioOutput::IAudioConfigListIterator*& audioConfigs /* @out */)  const override;
+        //Core::hresult GetAudioConfig(const std::string& audioConfig , bool& enabled /* @out */) const override;
+        //Core::hresult SetAudioConfig(const std::string& audioConfig , const bool enabled) override;
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
 
@@ -120,6 +125,76 @@ namespace Plugin {
                                 Exchange::IDeviceSettingsAudio::StereoMode audioMode);
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                                         bool status);
+       
+	// inside AudioOutputImplementation (private section):
+	class CecSinkNotification : public Exchange::IHdmiCecSink::INotification {
+	private:
+	    CecSinkNotification(const CecSinkNotification&) = delete;
+	    CecSinkNotification& operator=(const CecSinkNotification&) = delete;
+
+	public:
+	    explicit CecSinkNotification(AudioOutputImplementation& parent) : _parent(parent) {}
+	    ~CecSinkNotification() override = default;
+
+	    // The ONE event you care about — forward it to the parent
+	    void ReportAudioStatusEvent(const int muteStatus, const int volumeLevel) override {
+	        _parent.OnArcAudioStatusChanged(muteStatus, volumeLevel);
+    	    }
+
+
+	    BEGIN_INTERFACE_MAP(CecSinkNotification)
+           INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
+    	    END_INTERFACE_MAP
+
+	private:
+	    AudioOutputImplementation& _parent;
+	};
+
+	public:
+		enum Event {
+    			AUDIOOUTPUT_EVT_ONVOLUMELEVELCHANGED,
+			AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED		
+		     };
+
+        class EXTERNAL Job : public Core::IDispatch {
+            protected:
+                Job(AudioOutputImplementation* audioOutputImplementation, Event event, JsonObject &params)
+                    : _audioOutputImplementation(audioOutputImplementation)
+                    , _event(event)
+                    , _params(params) {
+                    if (audioOutputImplementation != nullptr) {
+                        _audioOutputImplementation->AddRef();
+                    }
+                }
+
+            public:
+                Job() = delete;
+                Job(const Job&) = delete;
+                Job& operator=(const Job&) = delete;
+                ~Job() {
+                    if (_audioOutputImplementation != nullptr) {
+                        _audioOutputImplementation->Release();
+                    }
+                }
+
+            public:
+                static Core::ProxyType<Core::IDispatch> Create(AudioOutputImplementation* audioOutputImplementation, Event event, JsonObject  params) {
+#ifndef USE_THUNDER_R4
+                    return (Core::proxy_cast<Core::IDispatch>(Core::ProxyType<Job>::Create(audioOutputImplementation, event, params)));
+#else
+                    return (Core::ProxyType<Core::IDispatch>(Core::ProxyType<Job>::Create(audioOutputImplementation, event, params)));
+#endif
+                }
+
+                virtual void Dispatch() {
+                    _audioOutputImplementation->Dispatch(_event, _params);
+                }
+
+            private:
+                AudioOutputImplementation *_audioOutputImplementation;
+		const Event _event;
+                JsonObject _params;
+        };
 
     private:
         mutable Core::CriticalSection _adminLock;
@@ -132,12 +207,26 @@ namespace Plugin {
         // Init failure flags — atomic so they need no lock
         mutable std::atomic<bool> _atmosMetadataInitFailed{false};
         mutable std::atomic<bool> _soundModeInitFailed{false};
-
+	
+	void unsubscribeFromCecSink();
+	void subscribeToCecSink();	
+	// new: handles ARC audio status from HdmiCecSink
+        void OnArcAudioStatusChanged(int muteStatus, int volumeLevel);
+	//Notification dispatch method
+	void dispatchEvent(Event, const JsonObject &params);
+        void Dispatch(Event event, const JsonObject &params);
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
-
+	
+	PluginHost::IShell* m_shellService { nullptr };
         // DeviceSettings audio event delegate (COM-RPC)
         Core::Sink<DSAudioNotification> _dsAudioNotification{*this};
+	// new — HdmiCecSink subscription
+        Core::Sink<CecSinkNotification> _cecSinkNotification{*this};   // the delegate you Register
+        Exchange::IHdmiCecSink* _cecSink { nullptr };
+
+    public:
+	friend class Job;
     };
 
 } // namespace Plugin

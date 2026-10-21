@@ -25,6 +25,9 @@
 #include "UtilsLogging.h"
 #include "UtilsSearchRDKProfile.h"
 
+static int  hdmiArcVolumeLevel = 0;
+static bool hdmiArcMuteStatus = false;
+
 namespace WPEFramework {
 namespace Plugin {
 
@@ -58,6 +61,12 @@ namespace Plugin {
             LOGWARN("~AudioOutputImplementation: Cannot unregister — IDeviceSettingsAudio unavailable");
         }
         DSHelper::Close();
+	unsubscribeFromCecSink();
+	if (m_shellService) 
+	{
+            m_shellService->Release();
+            m_shellService = nullptr;
+      	}
     }
 
     // -------------------------------------------------------------------------
@@ -67,19 +76,42 @@ namespace Plugin {
     uint32_t AudioOutputImplementation::Configure(PluginHost::IShell* service)
     {
         ASSERT(service != nullptr);
-
+ 	m_shellService = service;
+        m_shellService->AddRef();		
         // Open the COM-RPC link to the DeviceSettings plugin. If DeviceSettings is
         // already active, OnDeviceSettingsActivated() fires synchronously here.
-		LOGINFO("Configure: Opening DeviceSettings COM-RPC link for AudioOutput plugin");
+	LOGINFO("Configure: Opening DeviceSettings COM-RPC link for AudioOutput plugin");
         const uint32_t result = DSHelper::Open(service, "AudioOutput");
         if (result != Core::ERROR_NONE) {
             LOGERR("Configure: DSHelper::Open() failed with result=%u — audio events will NOT work", result);
         } else {
             LOGINFO("Configure: DSHelper::Open() succeeded");
         }
+	subscribeToCecSink(); 
         return Core::ERROR_NONE;
     }
+    
+    void AudioOutputImplementation::subscribeToCecSink()
+    {
+    	if (m_shellService == nullptr) return;
 
+    	_cecSink = m_shellService->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
+    	if (_cecSink == nullptr) {
+        	LOGERR("HdmiCecSink not active yet; ARC audio status events unavailable");
+        	return;                    // unavailable case — see note below
+    	}
+    	_cecSink->Register(&_cecSinkNotification);
+    	LOGINFO("Subscribed to HdmiCecSink ReportAudioStatusEvent");
+    }
+
+    void AudioOutputImplementation::unsubscribeFromCecSink()
+    {
+	if (_cecSink != nullptr) {
+            _cecSink->Unregister(&_cecSinkNotification);
+            _cecSink->Release();
+            _cecSink = nullptr;
+        }
+    }
     // -------------------------------------------------------------------------
     // DSHelper lifecycle hooks
     // -------------------------------------------------------------------------
@@ -199,6 +231,180 @@ namespace Plugin {
         return Core::ERROR_NONE;
     }
 
+     // -------------------------------------------------------------------------
+    // IAudioOutput::SetVolumeLevel
+    // -------------------------------------------------------------------------
+
+    Core::hresult AudioOutputImplementation::SetVolumeLevel(const string& audioPort, const uint32_t& volumeLevel, bool& success)
+   {
+	if (volumeLevel > 100) {
+            LOGWARN("volumeLevel invalid: %u (expected range [0, 100])", volumeLevel);
+       	    success = false;
+            return Core::ERROR_INVALID_PARAMETER; 
+    	}
+	int level = volumeLevel;
+        success = true;
+        string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
+	{
+            const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
+            if (INVALID_DS_HANDLE != audioHandle) {
+                auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+                if (audio != nullptr) {
+                    // DS_IARM: reads current_volumelevel = aPort.getLevel() before set
+                    float currentLevel = -1.0f;
+                    Core::hresult comResult = audio->GetAudioLevel(audioHandle, currentLevel);
+                    if (comResult == Core::ERROR_NONE) {
+                        comResult = audio->SetAudioLevel(audioHandle, static_cast<float>(volumeLevel));
+                        if (comResult == Core::ERROR_NONE) {
+                            if (static_cast<int>(currentLevel) != level) {
+				JsonObject params;
+				params["audioPort"] = audioport;
+           			params["volumeLevel"] =	level;
+				dispatchEvent(AUDIOOUTPUT_EVT_ONVOLUMELEVELCHANGED, params);
+				LOGINFO("SetAudioLevel success");
+                            }
+                        } else {
+                            LOGERR("SetAudioLevel failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
+                            success = false;
+                        }
+                    } else {
+                        LOGERR("GetAudioLevel failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
+                        success = false;
+                    }
+                    audio->Release();
+                } else {
+                    LOGERR("IDeviceSettingsAudio not available");
+                    success = false;
+		    //return Core::ERROR_UNAVAILABLE;
+                }
+            } else {
+                LOGERR("Failed to get audio port handle for audioPort='%s'", audioport.c_str());
+                success = false;
+            }
+        }
+       	return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+    }
+    
+    // -------------------------------------------------------------------------
+    // IAudioOutput::SetMuted
+    // -------------------------------------------------------------------------
+    Core::hresult AudioOutputImplementation::SetMuted(const string& audioPort, const bool muted, bool& success)
+    {
+    //    LOGINFOMETHOD();
+	static bool cache_muted = false;
+	success = true;
+	string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
+        LOGWARN("AudioOutputImplementation::SetMuted called Audio Port :%s muted:%d\n", audioport.c_str(), muted);
+	{
+            const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
+            if (INVALID_DS_HANDLE != audioHandle) {
+                auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+                if (audio != nullptr) {
+                    Core::hresult comResult = audio->SetAudioMute(audioHandle, muted);
+                    if (comResult == Core::ERROR_NONE) {
+                        if (cache_muted != muted) {
+                            cache_muted = muted;
+                            JsonObject params;
+			    params["muted"] = muted;
+		            params["audioPort"] = audioport;
+		            dispatchEvent(AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED, params);
+                        }
+                    } else {
+                        LOGERR("SetAudioMute failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
+                        success = false;
+                    }
+                    audio->Release();
+                } else {
+                    LOGERR("IDeviceSettingsAudio not available for audioPort='%s'", audioport.c_str());
+                    success = false;
+                }
+            } else {
+                LOGERR("Failed to get audio port handle for audioPort='%s'", audioport.c_str());
+                success = false;
+            }
+        }
+	return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+    }
+    
+   // -------------------------------------------------------------------------
+    // IAudioOutput::GetVolumeLevel
+    // -------------------------------------------------------------------------
+    Core::hresult AudioOutputImplementation::GetVolumeLevel(const string& audioPort, string& affectedAudioPort, int& volumeLevel, bool& success)
+    {
+	success = true;
+        float level = 0;
+	string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
+        // DS_IARM: HDMI_ARC0 uses cached hdmiArcVolumeLevel (updated via CEC onArcAudioStatusEventHandler)
+        if (audioport == "HDMI_ARC0") {
+            level = hdmiArcVolumeLevel;
+            volumeLevel = level;
+	    affectedAudioPort = audioport;
+	    return Core::ERROR_NONE;
+        }
+	{
+         const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
+          if (INVALID_DS_HANDLE != audioHandle) {
+               auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+               if (audio != nullptr) {
+                    float vol = 0;
+                    Core::hresult comResult = audio->GetAudioLevel(audioHandle, vol);
+                    if (comResult == Core::ERROR_NONE) {
+                        level = vol;
+                        volumeLevel = level;
+			affectedAudioPort = audioport;
+                    } else {
+                        LOGERR("GetAudioLevel failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
+                        success = false;
+                    }
+                    audio->Release();
+                } else {
+                    LOGERR("IDeviceSettingsAudio not available");
+                    success = false;
+                }
+            } else {
+                LOGERR("audio port handle not found for audioPort='%s'", audioport.c_str());
+                success = false;
+            }
+        }
+	return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+    }
+    
+    // -------------------------------------------------------------------------
+    // IAudioOutput::GetMuted
+    // -------------------------------------------------------------------------
+    Core::hresult AudioOutputImplementation::GetMuted(const string& audioPort, string& affectedAudioPort, bool& muted, bool& success)
+    {
+	//LOGINFOMETHOD();
+        success = true;
+        bool muteStatus = false;
+
+        string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
+	{
+          const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
+          if (INVALID_DS_HANDLE != audioHandle) {
+                auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+                if (audio != nullptr) {
+                    Core::hresult comResult = audio->IsAudioMuted(audioHandle, muteStatus);
+                    if (comResult == Core::ERROR_NONE) {
+                        muted = muteStatus;
+			affectedAudioPort = audioport;
+                    } else {
+                        LOGERR("IsAudioMuted failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
+                        success = false;
+                    }
+                    audio->Release();
+                } else {
+                    LOGERR("IDeviceSettingsAudio not available");
+                    success = false;
+                }
+            } else {
+                LOGERR("audio port handle not found for audioPort='%s'", audioport.c_str());
+                success = false;
+            }
+        }
+        return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+    }
+
     // -------------------------------------------------------------------------
     // IAudioOutput::SetAudioConfig / GetAudioConfig / GetSupportedAudioConfigs (COM-RPC)
     // Delegates to IDeviceSettingsAudio::SetApplicationAudioConfig / GetApplicationAudioConfig /
@@ -206,7 +412,7 @@ namespace Plugin {
     // the original libds Host::setApplicationAudioConfig(NULL, ...) semantics), so 0 is passed.
     // -------------------------------------------------------------------------
 
-    Core::hresult AudioOutputImplementation::SetAudioConfig(const std::string& audioConfig, const bool enable)
+   /* Core::hresult AudioOutputImplementation::SetAudioConfig(const std::string& audioConfig, const bool enable)
     {
         LOGINFO("Set %s audio configuration to enable = %s", audioConfig.c_str(), enable ? "true" : "false");
 
@@ -216,7 +422,8 @@ namespace Plugin {
             return Core::ERROR_UNAVAILABLE;
         }
 
-        const Core::hresult result = audio->SetApplicationAudioConfig(0, audioConfig, enable);
+     //   const Core::hresult result = audio->SetApplicationAudioConfig(0, audioConfig, enable);
+        const Core::hresult result = Core::ERROR_NONE;//Dummy created for build breakage
         audio->Release();
         if (result != Core::ERROR_NONE) {
             LOGERR("SetAudioConfig: SetApplicationAudioConfig failed: %u", result);
@@ -224,7 +431,7 @@ namespace Plugin {
         return result;
     }
 
-    Core::hresult AudioOutputImplementation::GetAudioConfig(const std::string& audioConfig, bool& enable /* @out */) const
+  //  Core::hresult AudioOutputImplementation::GetAudioConfig(const std::string& audioConfig, bool& enable) const
     {
         enable = false;
         LOGINFO("Get %s audio configuration", audioConfig.c_str());
@@ -234,7 +441,8 @@ namespace Plugin {
             return Core::ERROR_UNAVAILABLE;
         }
 
-        const Core::hresult result = audio->GetApplicationAudioConfig(0, audioConfig, enable);
+//        const Core::hresult result = audio->GetApplicationAudioConfig(0, audioConfig, enable);
+	const Core::hresult result = Core::ERROR_NONE;//Dummy created for build breakage
         audio->Release();
         if (result != Core::ERROR_NONE) {
             LOGERR("GetAudioConfig: GetApplicationAudioConfig failed: %u", result);
@@ -255,7 +463,8 @@ namespace Plugin {
         }
 
         Exchange::IDeviceSettingsAudio::IDeviceSettingsAudioApplicationConfigIterator* dsConfigs = nullptr;
-        const Core::hresult result = audio->GetApplicationAudioConfigList(0, dsConfigs);
+//        const Core::hresult result = audio->GetApplicationAudioConfigList(0, dsConfigs);
+	const Core::hresult result = Core::ERROR_NONE;//Dummy created for build breakage
         audio->Release();
         if (result != Core::ERROR_NONE) {
             LOGERR("GetSupportedAudioConfigs: GetApplicationAudioConfigList failed: %u", result);
@@ -275,7 +484,7 @@ namespace Plugin {
         audioConfigs = (Core::Service<RPC::IteratorType<Exchange::IAudioOutput::IAudioConfigListIterator>>::Create<Exchange::IAudioOutput::IAudioConfigListIterator>(configList));
         return Core::ERROR_NONE;
     }
-
+*/
     // -------------------------------------------------------------------------
     // IAudioOutput::Register / Unregister
     // -------------------------------------------------------------------------
@@ -315,6 +524,46 @@ namespace Plugin {
         _adminLock.Unlock();
 
         return Core::ERROR_NONE;
+    }
+
+    void AudioOutputImplementation::dispatchEvent(Event event, const JsonObject &params)
+    { 
+       Core::IWorkerPool::Instance().Submit(Job::Create(this, event, params));
+    }
+
+    void AudioOutputImplementation::Dispatch(Event event, const JsonObject &params)
+    {
+      _adminLock.Lock();
+      std::list<Exchange::IAudioOutput::INotification*>::const_iterator index (_observers.begin());
+      switch(event)
+      {
+	case AUDIOOUTPUT_EVT_ONVOLUMELEVELCHANGED:
+	{
+	   string audioPort = params["audioPort"];
+	   uint32_t volumeLevel = params["volumeLevel"].Number();
+	   while (index != _observers.end())
+	   {
+		   (*index)->OnVolumeLevelChanged(audioPort, volumeLevel);
+		   ++index;
+	   }
+	   break;
+	}
+	case AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED:
+	{
+	    string audioPort = params["audioPort"];
+	    bool muted = params["muted"].Boolean();
+	    while (index != _observers.end())
+            {
+	  	(*index)->OnMuteStatusChanged(audioPort, muted);
+		++index;
+	    }
+	    break;
+	}
+	default:
+               LOGWARN("Event[%u] not handled", event);
+               break;
+      }	       
+      _adminLock.Unlock();
     }
 
     // -------------------------------------------------------------------------
@@ -578,8 +827,37 @@ namespace Plugin {
         }
 
         audio->Release();
-        return Core::ERROR_NONE;
-    }
+        return Core::ERROR_NONE; 
+  }
+
+  void AudioOutputImplementation::OnArcAudioStatusChanged(int muteStatus, int volumeLevel) 
+  {
+    LOGINFO("ARC audio status changed: mute=%d, volume=%d", muteStatus, volumeLevel);
+    if ( volumeLevel < 0 || volumeLevel > 100 ) {
+         LOGWARN("Invalid volumeLevel in ARC Audio Status Event");
+         return;
+     }
+     if ( volumeLevel != hdmiArcVolumeLevel) {
+          hdmiArcVolumeLevel = volumeLevel;
+          JsonObject volParams;
+          volParams["volumeLevel"] = (int)hdmiArcVolumeLevel;
+	  volParams["audioPort"] = "HDMI_ARC0";
+          dispatchEvent(AUDIOOUTPUT_EVT_ONVOLUMELEVELCHANGED, volParams);
+     }
+
+     if ( muteStatus < 0 || muteStatus > 1 ) {
+         LOGWARN("Invalid muteStatus in ARC Audio Status Event");
+         return;
+      }
+      bool bMuteStatus = (muteStatus != 0);
+      if (bMuteStatus != hdmiArcMuteStatus) {
+           hdmiArcMuteStatus = bMuteStatus;
+           JsonObject params;
+           params["muted"] = hdmiArcMuteStatus;
+	   params["audioPort"] = "HDMI_ARC0";
+	   dispatchEvent(AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED, params);
+       }
+    } 
 
 } // namespace Plugin
 } // namespace WPEFramework

@@ -53,6 +53,18 @@ namespace Plugin {
                 Exchange::JAudioOutput::Event::OnDolbyAtmosExperienceChanged(_parent, dolbyAtmosExperience);
             }
 
+	    void OnVolumeLevelChanged(const string& audioPort, const uint32_t& volumeLevel) override
+	    {
+	       LOGINFO("AudioOutput::Notification::OnVolumeLevelChanged audioport: %s, volumelevel: %u", audioPort.c_str(), volumeLevel);
+	       Exchange::JAudioOutput::Event::OnVolumeLevelChanged(_parent, audioPort, volumeLevel);
+	    }
+	    
+	    void OnMuteStatusChanged(const string& audioPort, const bool muted) override
+            {
+               LOGINFO("AudioOutput::Notification::OnMuteStatusChanged audioport: %s, muteStatus: %s", audioPort.c_str(), muted ? "true" : "false");
+               Exchange::JAudioOutput::Event::OnMuteStatusChanged(_parent, audioPort, muted);
+            }
+
             BEGIN_INTERFACE_MAP(Notification)
             INTERFACE_ENTRY(Exchange::IAudioOutput::INotification)
             END_INTERFACE_MAP
