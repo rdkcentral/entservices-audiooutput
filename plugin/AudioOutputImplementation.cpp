@@ -312,19 +312,12 @@ namespace Plugin {
     void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
     {
         LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
-
-        bool cap = false;
-        if (AtmosMetadata(cap) != Core::ERROR_NONE) {
-            LOGERR("onReportAudioDeviceConnectedStatus: AtmosMetadata query failed");
-            return;
-        }
-
-        _atmosMetadataInitFailed = false;
-        _adminLock.Lock();
-        _atmosMetaData = cap;
-        _adminLock.Unlock();
-
-        UpdateCache();
+        // when external connected device enabled during bootup, set flag to fetch new device capability instead of
+		// using cache value.
+        if (!_externalArcEnabled) {
+		    _atmosMetadataInitFailed = true;
+			_externalArcEnabled = true;
+		}
     }
 
     // -------------------------------------------------------------------------
