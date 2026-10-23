@@ -338,11 +338,11 @@ namespace Plugin {
     // Queries the DeviceSettings plugin for the connected sink's Dolby Atmos
     // capability using cached audio-port handles.
     // -------------------------------------------------------------------------
-    uint32_t AtmosMetadata(bool& supported /* @out */) const override
+    uint32_t AudioOutputImplementation::AtmosMetadata(bool& supported /* @out */) const
     {
         supported = false;
 
-        auto* audio = const_cast<PlayerInfoImplementation*>(this)->DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio == nullptr) {
             LOGERR("AtmosMetadata: IDeviceSettingsAudio unavailable");
             return Core::ERROR_NONE;
@@ -361,7 +361,7 @@ namespace Plugin {
                 LOGINFO("AtmosMetadata: GetAudioEnablePersist(HDMI_ARC0) = %s", arcEnabled ? "true" : "false");
             }
 
-            DolbyAtmosCapability capability = DolbyAtmosCapability::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
+            Exchange::IDeviceSettingsAudio::DolbyAtmosCapability capability = Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
             if (arcEnabled && arcHandle != INVALID_DS_HANDLE) {
                 // ARC is enabled — query HDMI_ARC0 for ATMOS capability
                 LOGINFO("AtmosMetadata: ARC enabled, querying HDMI_ARC0 for ATMOS capability");
@@ -377,7 +377,7 @@ namespace Plugin {
                     LOGWARN("AtmosMetadata: no HDMI_ARC (enabled), HDMI, or SPEAKER port found");
                 }
             }
-            supported = (capability == DolbyAtmosCapability::AUDIO_DOLBY_ATMOS_METADATA);
+            supported = (capability == Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_METADATA);
             LOGINFO("AtmosMetadata: capability=%d, supported=%s",
                     static_cast<int>(capability), supported ? "true" : "false");
         } else {
@@ -402,17 +402,17 @@ namespace Plugin {
             }
 
             if (selectedHandle != INVALID_DS_HANDLE) {
-                DolbyAtmosCapability capability = DolbyAtmosCapability::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
+                Exchange::IDeviceSettingsAudio::DolbyAtmosCapability capability = Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
                 audio->GetAudioSinkDeviceAtmosCapability(selectedHandle, capability);
-                supported = (capability == DolbyAtmosCapability::AUDIO_DOLBY_ATMOS_METADATA);
+                supported = (capability == Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_METADATA);
                 LOGINFO("AtmosMetadata: capability=%d, supported=%s",
                         static_cast<int>(capability), supported ? "true" : "false");
             } else {
                 int32_t spkHandle = DSHelper::getCachedAudioPortHandle("SPEAKER0");
                 if (spkHandle != INVALID_DS_HANDLE) {
-                    DolbyAtmosCapability capability = DolbyAtmosCapability::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
+                    Exchange::IDeviceSettingsAudio::DolbyAtmosCapability capability = Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
                     audio->GetAudioSinkDeviceAtmosCapability(spkHandle, capability);
-                    supported = (capability == DolbyAtmosCapability::AUDIO_DOLBY_ATMOS_METADATA);
+                    supported = (capability == Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_METADATA);
                     LOGINFO("AtmosMetadata (SPEAKER fallback): capability=%d, supported=%s",
                             static_cast<int>(capability), supported ? "true" : "false");
 				} else {
