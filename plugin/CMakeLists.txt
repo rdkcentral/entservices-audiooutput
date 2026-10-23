@@ -27,7 +27,7 @@ find_package(${NAMESPACE}Plugins REQUIRED)
 find_package(${NAMESPACE}Definitions REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
 find_package(DS REQUIRED)
-find_package(${NAMESPACE}Helpers REQUIRED)
+find_package(${NAMESPACE}Helpers CONFIG REQUIRED)
 
 # ----------------------------------------------------------------
 # Plugin shell library — thin layer: lifecycle + JSON-RPC dispatch
