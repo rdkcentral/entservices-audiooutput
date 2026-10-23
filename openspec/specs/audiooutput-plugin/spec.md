@@ -12,7 +12,9 @@ A new Thunder plugin `AudioOutput` is introduced to expose the Dolby Atmos Exper
 
 The `AudioOutput` plugin is a WPEFramework (Thunder) service registered under the callsign `org.rdk.AudioOutput`. It is the canonical place for audio output related capabilities exposed to Firebolt clients.
 
-The initial capability is **Dolby Atmos Experience** determination. Rather than requiring clients to call two separate PlayerInfo APIs and combine the results themselves, `AudioOutput` exposes a single boolean method `dolbyAtmosExperience` that encapsulates the combination logic internally. The plugin maintains an internal cache of the two underlying values (`AtmosCapability` and `soundMode`) and recomputes the combined result whenever either value changes via DS HAL event callbacks registered through `device::Host::IAudioOutputPortEvents`.
+The initial capability is **Dolby Atmos Experience** determination. Rather than requiring clients to call two separate PlayerInfo APIs and combine the results themselves, `AudioOutput` exposes a single boolean method `dolbyAtmosExperience` that encapsulates the combination logic internally. The plugin maintains an internal cache of the two underlying values (`AtmosCapability` and `soundMode`) and recomputes the combined result whenever either value changes via DeviceSettings COM-RPC event callbacks delivered through `Exchange::IDeviceSettingsAudio::INotification`.
+
+All capability and sound-mode data is obtained from the `entservices-devicesettings` plugin over COM-RPC using the `DSHelper` base class (from `entservices-helpers/helpers/DeviceSettingsInterface.h`), which owns a single `RPC::PluginSmartInterfaceType<Exchange::IDeviceSettings>` link and acquires the `IDeviceSettingsAudio` sub-interface on demand. The plugin no longer registers directly with the DS HAL for these values. The application-audio-config trio (`setAudioConfig`/`getAudioConfig`/`getSupportedAudioConfigs`) remains on direct libds `device::Host` calls, as there is no DeviceSettings COM-RPC equivalent yet.
 
 ### Plugin Structure
 
@@ -51,7 +53,7 @@ Step 2: Check soundMode
                                         →  return true
 ```
 
-Both values are obtained by direct HAL queries via `device::Host` (DeviceSettings) at startup, then kept in cache and refreshed on every relevant DS HAL event.
+Both values are obtained over DeviceSettings COM-RPC (`IDeviceSettingsAudio::GetAudioSinkDeviceAtmosCapability` for AtmosCapability and `IDeviceSettingsAudio::GetStereoMode`/`GetStereoAuto` for soundMode) when the DeviceSettings plugin activates, then kept in cache and refreshed on every relevant DeviceSettings COM-RPC event.
 
 ### Cache and Event Flow
 
@@ -68,8 +70,8 @@ Both values are obtained by direct HAL queries via `device::Host` (DeviceSetting
           ┌────────────────────┼─────────────────────┐
           │                                           │
           ▼                                           ▼
- DS HAL: OnDolbyAtmosCapabilitiesChanged    DS HAL: OnAudioModeEvent
- (device::Host::IAudioOutputPortEvents)    (device::Host::IAudioOutputPortEvents)
+ DS COM-RPC: OnDolbyAtmosCapabilitiesChanged  DS COM-RPC: OnAudioModeEvent
+ (IDeviceSettingsAudio::INotification)      (IDeviceSettingsAudio::INotification)
           │                                           │
           ▼                                           ▼
   Update _atmosMetaData                    Update _soundMode
@@ -95,10 +97,10 @@ Both values are obtained by direct HAL queries via `device::Host` (DeviceSetting
 - **REQ-04**: `dolbyAtmosExperience` MUST return `false` when `AtmosCapability == ATMOS_METADATA` but `soundMode` is one of `{ MONO, STEREO, DOLBYDIGITAL, UNKNOWN }`.
 - **REQ-05**: The plugin MUST send an `onDolbyAtmosExperienceChanged` notification to all subscribers whenever the computed `dolbyAtmosExperience` value changes.
 - **REQ-06**: The notification payload MUST include a `dolbyAtmosExperience` boolean field.
-- **REQ-07**: The plugin MUST listen to the `OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t, bool)` DS HAL event via `device::Host::IAudioOutputPortEvents` to detect changes in AtmosCapability.
-- **REQ-08**: The plugin MUST listen to the `OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t)` DS HAL event via `device::Host::IAudioOutputPortEvents` to detect changes in soundMode.
-- **REQ-08a**: When `OnAudioModeEvent` fires with `portType == dsAUDIOPORT_TYPE_HDMI_ARC` but only the internal speaker (speaker0) is connected and no external device is present, the plugin MUST ignore the event and MUST NOT update `_soundMode` or recompute `dolbyAtmosExperience`.
-- **REQ-09**: The plugin MUST call `device::Manager::Initialize()` at construction and query initial `AtmosCapability` and `soundMode` values directly from the DS HAL via `device::Host` before processing any client requests.
+- **REQ-07**: The plugin MUST subscribe to the `OnDolbyAtmosCapabilitiesChanged(DolbyAtmosCapability, bool)` DeviceSettings COM-RPC event via `Exchange::IDeviceSettingsAudio::INotification` to detect changes in AtmosCapability.
+- **REQ-08**: The plugin MUST subscribe to the `OnAudioModeEvent(AudioPortType, StereoMode)` DeviceSettings COM-RPC event via `Exchange::IDeviceSettingsAudio::INotification` to detect changes in soundMode.
+- **REQ-08a**: When `OnAudioModeEvent` fires, the plugin MUST recompute the effective sound mode over COM-RPC (applying the HDMI_ARC > HDMI > SPEAKER > SPDIF > HEADPHONE port precedence and per-port enabled/connected checks) rather than trusting the single per-port event; a mode reported for a port that is not the selected/connected output MUST NOT change `_soundMode`.
+- **REQ-09**: The plugin MUST open the DeviceSettings COM-RPC link via `DSHelper::Open()` in `Configure()` and, when DeviceSettings activates (`OnDeviceSettingsActivated()`), register its `IDeviceSettingsAudio::INotification` delegate and query the initial `AtmosCapability` and `soundMode` values over COM-RPC before processing client requests. `device::Manager::Initialize()` is retained at construction ONLY for the application-audio-config libds path.
 - **REQ-10**: The plugin MUST NOT remove or modify `PlayerInfo.AtmosMetadata` or `PlayerInfo.soundMode`.
 - **REQ-11**: The plugin MUST return `Core::ERROR_NONE` on success and propagate errors appropriately.
 - **REQ-12**: The plugin MUST be thread-safe; a `Core::CriticalSection` MUST protect all cache reads and writes.
@@ -141,17 +143,19 @@ Both values are obtained by direct HAL queries via `device::Host` (DeviceSetting
 │  │  │  AudioOutputImplementation.cpp/.h                    │  │  │
 │  │  │  - Exchange::IAudioOutput                            │  │  │
 │  │  │  - Exchange::IConfiguration                          │  │  │
-│  │  │  - DsAudioPortNotification (inner class)             │  │  │
-│  │  │      implements IAudioOutputPortEvents               │  │  │
+│  │  │  - DSHelper (IDeviceSettings COM-RPC link)           │  │  │
+│  │  │  - DSAudioNotification (inner class)                 │  │  │
+│  │  │      implements IDeviceSettingsAudio::INotification  │  │  │
 │  │  │  - Internal cache + decision logic                   │  │  │
 │  │  └──────────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────┘  │
-│                    │ DS HAL callbacks                             │
+│                    │ COM-RPC (IDeviceSettingsAudio)               │
 │                    ▼                                             │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  DeviceSettings HAL (dshal / device::Host)                 │  │
-│  │  - OnAudioModeEvent                                        │  │
-│  │  - OnDolbyAtmosCapabilitiesChanged                        │  │
+│  │  entservices-devicesettings plugin (org.rdk.DeviceSettings) │  │
+│  │  - IDeviceSettingsAudio::GetAudioSinkDeviceAtmosCapability  │  │
+│  │  - IDeviceSettingsAudio::GetStereoMode / GetStereoAuto      │  │
+│  │  - OnAudioModeEvent / OnDolbyAtmosCapabilitiesChanged       │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -165,17 +169,18 @@ Both values are obtained by direct HAL queries via `device::Host` (DeviceSetting
 
 ### Implementation: AudioOutputImplementation.h / .cpp
 
-- Inherits `Exchange::IAudioOutput` and `Exchange::IConfiguration`.
-- Contains inner class `DsAudioPortNotification` implementing `device::Host::IAudioOutputPortEvents`, registered via `device::Host::getInstance().Register()` at construction.
-- Relevant HAL callbacks implemented: `OnAudioModeEvent(dsAudioPortType_t, dsAudioStereoMode_t)` and `OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t, bool)`; all other `IAudioOutputPortEvents` callbacks are stubs.
+- Inherits `Exchange::IAudioOutput`, `Exchange::IConfiguration`, and `DSHelper` (the DeviceSettings COM-RPC client base from `entservices-helpers`).
+- Contains inner class `DSAudioNotification` implementing `Exchange::IDeviceSettingsAudio::INotification`, registered via `IDeviceSettingsAudio::Register()` inside `OnDeviceSettingsActivated()`.
+- Relevant COM-RPC event callbacks implemented: `OnAudioModeEvent(AudioPortType, StereoMode)` and `OnDolbyAtmosCapabilitiesChanged(DolbyAtmosCapability, bool)`.
 - `SERVICE_REGISTRATION(AudioOutputImplementation, 1, 0)` macro required.
 - Thread-safe: use `Core::CriticalSection _adminLock` to protect cache reads/writes.
 
 ### Initialisation Sequence
 
-1. Constructor: call `device::Manager::Initialize()`; call `device::Host::getInstance().Register(&_dsAudioPortNotification, ...)` to subscribe to DS HAL events.
-2. `Configure(IShell*)` (called by plugin shell after `Root<>()`): call `UpdateCache()` which queries `AtmosMetadata()` and `SoundMode()` directly from the HAL and populates `_atmosMetaData`, `_soundMode`, and `_dolbyAtmosExperience`.
-3. Destructor: unregister from DS HAL via `device::Host::getInstance().UnRegister()`, call `device::Manager::DeInitialize()`.
+1. Constructor: call `device::Manager::Initialize()` — retained ONLY for the application-audio-config libds path (`setAudioConfig`/`getAudioConfig`/`getSupportedAudioConfigs`).
+2. `Configure(IShell*)` (called by plugin shell after `Root<>()`): call `DSHelper::Open(service, "AudioOutput")` to open the COM-RPC link to the DeviceSettings plugin.
+3. `OnDeviceSettingsActivated()` (fired by DSHelper when DeviceSettings is ready, and again after any DS restart): register `DSAudioNotification` on `IDeviceSettingsAudio`, then query `AtmosMetadata()` and `SoundMode()` over COM-RPC and populate `_atmosMetaData`, `_soundMode`, and `_dolbyAtmosExperience` via `UpdateCache()`.
+4. Destructor: unregister `DSAudioNotification` from `IDeviceSettingsAudio`, call `DSHelper::Close()`, then `device::Manager::DeInitialize()`.
 
 ### Module Files
 
@@ -202,7 +207,7 @@ Two CMake targets:
 1. `${NAMESPACE}AudioOutput` — plugin shell (`.so`)
 2. `${NAMESPACE}AudioOutputImplementation` — business logic (`.so`)
 
-`find_package` dependencies: `${NAMESPACE}Plugins`, `${NAMESPACE}Definitions`, `CompileSettingsDebug`
+`find_package` dependencies: `${NAMESPACE}Plugins`, `${NAMESPACE}Definitions`, `${NAMESPACE}Helpers`, `DS`, `CompileSettingsDebug`
 
 `CXX_STANDARD: 11`
 
