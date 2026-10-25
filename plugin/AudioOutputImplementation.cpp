@@ -252,11 +252,8 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation::onAudioModeChanged: portType=%d, audioMode=%d",
                 static_cast<int>(audioPortType), static_cast<int>(audioMode));
 
-        // Recompute the effective sound mode over COM-RPC — SoundMode() applies the
-        // full port precedence + connectivity rules rather than trusting a single
-        // per-port event, mirroring the DS_IARM behaviour.
-        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
-        if (SoundMode(mode) == Core::ERROR_NONE) {
+        Exchange::IAudioOutput::AudioModes mode = DsAudioModeToSoundMode(audioMode);
+        if (mode != _soundMode) {
             _adminLock.Lock();
             _soundMode = mode;
             _adminLock.Unlock();
