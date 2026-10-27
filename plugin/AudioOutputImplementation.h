@@ -129,7 +129,7 @@ namespace Plugin {
         bool _dolbyAtmosExperience{false};
 
         // Init failure flags — atomic so they need no lock
-        mutable std::atomic<bool> _atmosMetadataInitFailed{false};
+        mutable std::atomic<bool> _reloadMetadata{false};
         mutable std::atomic<bool> _soundModeInitFailed{false};
 
         // Observer list
