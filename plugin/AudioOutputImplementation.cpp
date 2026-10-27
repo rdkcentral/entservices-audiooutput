@@ -80,11 +80,11 @@ namespace Plugin {
         ASSERT(service != nullptr);
 
         bool cap = false;
-        bool atmosMetadataFailed = false;
+        bool reloadMetadata = false;
 
         if (AtmosMetadata(cap) != Core::ERROR_NONE) {
             LOGERR("Configure: failed to get atmos metadata");
-            atmosMetadataFailed = true;
+            reloadMetadata = true;
         }
 
         Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
@@ -94,7 +94,7 @@ namespace Plugin {
             soundModeInitFailed = true;
         }
 
-        _atmosMetadataInitFailed = atmosMetadataFailed;
+        _reloadMetadata = reloadMetadata;
         _soundModeInitFailed = soundModeInitFailed;
 
         _adminLock.Lock();
@@ -107,6 +107,12 @@ namespace Plugin {
 
         return Core::ERROR_NONE;
     }
+
+    void AudioOutputImplementation::OnHdmiInEventHotPlug(dsHdmiInPort_t port, bool isConnected)
+    {
+		 LOGINFO("Received OnHdmiInEventHotPlug callback, port: %d, isConnected: %s", port, isConnected ? "true" : "false");
+		 _reloadMetadata = true;
+	}
 
     void AudioOutputImplementation::registerDsEventHandlers()
     {
@@ -155,7 +161,7 @@ namespace Plugin {
 
     Core::hresult AudioOutputImplementation::DolbyAtmosExperience(bool& enabled) const
     {
-        if (_atmosMetadataInitFailed || _soundModeInitFailed) {
+        if (_reloadMetadata || _soundModeInitFailed) {
             LOGINFO("DolbyAtmosExperience: prior init failure detected, retrying HAL queries");
 
             bool cap = false;
@@ -170,7 +176,7 @@ namespace Plugin {
                 return Core::ERROR_GENERAL;
             }
 
-            _atmosMetadataInitFailed = false;
+            _reloadMetadata = false;
             _soundModeInitFailed = false;
 
             _adminLock.Lock();
