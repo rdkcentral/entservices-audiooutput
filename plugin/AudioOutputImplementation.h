@@ -38,7 +38,8 @@ namespace Plugin {
 
     class AudioOutputImplementation
         : public Exchange::IConfiguration
-        , public Exchange::IAudioOutput {
+        , public Exchange::IAudioOutput
+        , public device::Host::IHdmiInEvents {
 
     public:
         AudioOutputImplementation(const AudioOutputImplementation&) = delete;
@@ -59,6 +60,15 @@ namespace Plugin {
 
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
+
+        // HdmiInEventNotification
+        void OnHdmiInEventHotPlug(dsHdmiInPort_t port, bool isConnected) override;
+        void OnHdmiInEventSignalStatus(dsHdmiInPort_t port, dsHdmiInSignalStatus_t signalStatus) override {};   
+        void OnHdmiInEventStatus(dsHdmiInPort_t activePort, bool isPresented) override {};
+        void OnHdmiInVideoModeUpdate(dsHdmiInPort_t port, const dsVideoPortResolution_t& videoPortResolution) override {};
+        void OnHdmiInAllmStatus(dsHdmiInPort_t port, bool allmStatus) override {};
+        void OnHdmiInAVIContentType(dsHdmiInPort_t port, dsAviContentType_t aviContentType) override {};
+        void OnHdmiInVRRStatus(dsHdmiInPort_t port, dsVRRType_t vrrType) override {};
 
     private:
         class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
