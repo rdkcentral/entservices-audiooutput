@@ -23,7 +23,6 @@
 #include <interfaces/Ids.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IConfiguration.h>
-#include <interfaces/IHdmiCecSink.h>
 #include <interfaces/IDeviceSettingsAudio.h>
 
 #include <com/com.h>
@@ -70,32 +69,6 @@ namespace Plugin {
         void OnDeviceSettingsDeactivated() override;
 
     private:
-	class HdmiCecSinkNotification : public Exchange::IHdmiCecSink::INotification {
-        private:
-            HdmiCecSinkNotification(const HdmiCecSinkNotification&) = delete;
-            HdmiCecSinkNotification& operator=(const HdmiCecSinkNotification&) = delete;
-
-        public:
-            explicit HdmiCecSinkNotification(AudioOutputImplementation* parent)
-                : _parent(*parent)
-            {
-                ASSERT(parent != nullptr);
-            }
-            ~HdmiCecSinkNotification() override = default;
-
-            BEGIN_INTERFACE_MAP(HdmiCecSinkNotification)
-            INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
-            END_INTERFACE_MAP
-
-            void ReportAudioDevicePowerStatus(const int powerStatus) override
-            {
-                _parent.ReportAudioDevicePowerStatus(powerStatus);
-            }
-
-        private:
-            AudioOutputImplementation& _parent;
-        };
-
         // DS Audio event delegate — receives DeviceSettings audio notifications over
         // COM-RPC and forwards them to the parent implementation.
         class DSAudioNotification : public Exchange::IDeviceSettingsAudio::INotification {
@@ -145,7 +118,6 @@ namespace Plugin {
                                 Exchange::IDeviceSettingsAudio::StereoMode audioMode);
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                                         bool status);
-	void ReportAudioDevicePowerStatus(const int powerStatus);
 
     private:
         mutable Core::CriticalSection _adminLock;
@@ -157,10 +129,7 @@ namespace Plugin {
 
         // Init failure flags — atomic so they need no lock
         mutable std::atomic<bool> _atmosMetadataInitFailed{false};
-	 mutable std::atomic<bool> _externalArcEnabled{false};
         mutable std::atomic<bool> _soundModeInitFailed{false};
-	Exchange::IHdmiCecSink* _hdmiCecSink{nullptr};
-	Core::Sink<HdmiCecSinkNotification> _hdmiCecSinkNotification;
 
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;

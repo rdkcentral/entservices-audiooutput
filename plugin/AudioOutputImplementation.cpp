@@ -37,7 +37,6 @@ namespace Plugin {
     // -------------------------------------------------------------------------
 
     AudioOutputImplementation::AudioOutputImplementation()
-      : _hdmiCecSinkNotification(this)
     {
         LOGINFO("AudioOutputImplementation Constructor");
     }
@@ -45,12 +44,6 @@ namespace Plugin {
     AudioOutputImplementation::~AudioOutputImplementation()
     {
         LOGINFO("AudioOutputImplementation Destructor");
-
-	if (_hdmiCecSink != nullptr) {
-            _hdmiCecSink->Unregister(&_hdmiCecSinkNotification);
-            _hdmiCecSink->Release();
-            _hdmiCecSink = nullptr;
-        }
 
         // Unregister the DS audio notification before the COM-RPC link is closed.
         auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
@@ -84,15 +77,6 @@ namespace Plugin {
         } else {
             LOGINFO("Configure: DSHelper::Open() succeeded");
         }
-
-	_hdmiCecSink = service->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
-        if (_hdmiCecSink != nullptr) {
-            _hdmiCecSink->Register(&_hdmiCecSinkNotification);
-	    LOGINFO("AudioOutputImplementation::Configure: registered for HdmiCecSink ReportAudioDevicePowerStatus notification");
-        } else {
-            LOGWARN("AudioOutputImplementation::Configure: HdmiCecSink not available, ReportAudioDevicePowerStatus will not be received");
-        }
-
         return Core::ERROR_NONE;
     }
 
@@ -276,22 +260,6 @@ namespace Plugin {
             UpdateCache();
         } else {
             LOGERR("onAudioModeChanged: SoundMode query failed");
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // onReportAudioDeviceConnectedStatus
-    // HdmiCecSink callback: re-query AtmosMetadata and refresh the cache
-    // -------------------------------------------------------------------------
-
-    void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
-    {
-        // when external connected device enabled during bootup, set flag to fetch new device capability instead of
-	// using cache value.
-        if (!_externalArcEnabled) {
-            LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
-            _atmosMetadataInitFailed = true;
-            _externalArcEnabled = true;
         }
     }
 
