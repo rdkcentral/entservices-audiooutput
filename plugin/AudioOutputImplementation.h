@@ -38,8 +38,7 @@ namespace Plugin {
 
     class AudioOutputImplementation
         : public Exchange::IConfiguration
-        , public Exchange::IAudioOutput
-        , public device::Host::IHdmiInEvents {
+        , public Exchange::IAudioOutput {
 
     public:
         AudioOutputImplementation(const AudioOutputImplementation&) = delete;
@@ -60,18 +59,10 @@ namespace Plugin {
 
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
-
-        // HdmiInEventNotification
-        void OnHdmiInEventHotPlug(dsHdmiInPort_t port, bool isConnected) override;
-        void OnHdmiInEventSignalStatus(dsHdmiInPort_t port, dsHdmiInSignalStatus_t signalStatus) override {};   
-        void OnHdmiInEventStatus(dsHdmiInPort_t activePort, bool isPresented) override {};
-        void OnHdmiInVideoModeUpdate(dsHdmiInPort_t port, const dsVideoPortResolution_t& videoPortResolution) override {};
-        void OnHdmiInAllmStatus(dsHdmiInPort_t port, bool allmStatus) override {};
-        void OnHdmiInAVIContentType(dsHdmiInPort_t port, dsAviContentType_t aviContentType) override {};
-        void OnHdmiInVRRStatus(dsHdmiInPort_t port, dsVRRType_t vrrType) override {};
-
+       
     private:
-        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
+        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents 
+                                      , public device::Host::IHdmiInEvents {
         private:
             DsAudioPortNotification(const DsAudioPortNotification&) = delete;
             DsAudioPortNotification& operator=(const DsAudioPortNotification&) = delete;
@@ -102,6 +93,19 @@ namespace Plugin {
                 _parent.onAudioModeChanged(type, smode);
             }
 
+            // HdmiInEventNotification
+            void OnHdmiInEventHotPlug(dsHdmiInPort_t port, bool isConnected) override
+            {
+                _parent.OnHdmiInEventHotPlug(port, isConnected);
+            }
+
+            void OnHdmiInEventSignalStatus(dsHdmiInPort_t port, dsHdmiInSignalStatus_t signalStatus) override {};   
+            void OnHdmiInEventStatus(dsHdmiInPort_t activePort, bool isPresented) override {};
+            void OnHdmiInVideoModeUpdate(dsHdmiInPort_t port, const dsVideoPortResolution_t& videoPortResolution) override {};
+            void OnHdmiInAllmStatus(dsHdmiInPort_t port, bool allmStatus) override {};
+            void OnHdmiInAVIContentType(dsHdmiInPort_t port, dsAviContentType_t aviContentType) override {};
+            void OnHdmiInVRRStatus(dsHdmiInPort_t port, dsVRRType_t vrrType) override {};
+
         private:
             AudioOutputImplementation& _parent;
         };
@@ -119,6 +123,7 @@ namespace Plugin {
         void unregisterDsEventHandlers();
         void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
         void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
+        void OnHdmiInEventHotPlug(dsHdmiInPort_t port, bool isConnected);
 
     private:
         mutable Core::CriticalSection _adminLock;
