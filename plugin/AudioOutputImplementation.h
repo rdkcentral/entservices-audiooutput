@@ -61,8 +61,7 @@ namespace Plugin {
         uint32_t Configure(PluginHost::IShell* service) override;
        
     private:
-        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents 
-                                      , public device::Host::IHdmiInEvents {
+        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
         private:
             DsAudioPortNotification(const DsAudioPortNotification&) = delete;
             DsAudioPortNotification& operator=(const DsAudioPortNotification&) = delete;
@@ -93,7 +92,24 @@ namespace Plugin {
                 _parent.onAudioModeChanged(type, smode);
             }
 
-            // HdmiInEventNotification
+        private:
+            AudioOutputImplementation& _parent;
+        };
+
+        class DsHdminNotification : public device::Host::IHdmiInEvents {
+        private:
+            DsHdminNotification(const DsHdminNotification&) = delete;
+            DsHdminNotification& operator=(const DsHdminNotification&) = delete;
+
+        public:
+            explicit DsHdminNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~DsHdminNotification() override = default;
+
+        public:
+           // HdmiInEventNotification
             void OnHdmiInEventHotPlug(dsHdmiInPort_t port, bool isConnected) override
             {
                 _parent.OnHdmiInEventHotPlug(port, isConnected);
@@ -142,6 +158,7 @@ namespace Plugin {
 
         // DS HAL event listener
         DsAudioPortNotification _dsAudioPortNotification{*this};
+        DsHdminNotification _dsHdminNotification{*this};
         bool _registeredDsEventHandlers{false};
     };
 
