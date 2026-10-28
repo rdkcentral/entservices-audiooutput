@@ -118,6 +118,7 @@ namespace Plugin {
     {
         if (!_registeredDsEventHandlers) {
             device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]");
+			device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]");
             _registeredDsEventHandlers = true;
             LOGINFO("Registered for IAudioOutputPortEvents");
         }
@@ -127,6 +128,7 @@ namespace Plugin {
     {
         if (_registeredDsEventHandlers) {
             device::Host::getInstance().UnRegister(&_dsAudioPortNotification);
+			device::Host::getInstance().UnRegister(&_dsAudioPortNotification);
 			_registeredDsEventHandlers = false;
             LOGINFO("Unregistered from IAudioOutputPortEvents");
         }
