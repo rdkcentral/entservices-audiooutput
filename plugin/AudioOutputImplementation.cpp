@@ -251,16 +251,32 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation::onAudioModeChanged: portType=%d, audioMode=%d",
                 static_cast<int>(audioPortType), static_cast<int>(audioMode));
-
-        Exchange::IAudioOutput::AudioModes mode = DsAudioModeToSoundMode(audioMode);
-        if (mode != _soundMode) {
+		bool isAudioModeChanged = false;
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        if (audio != nullptr) {
+            for (const auto& kv : DSHelper::getAudioPortHandleEntries()) {
+                const std::string& connectedPortName = kv.first;
+                int32_t portHandle = kv.second;
+                if (DSHelper::isAudioOutputPortConnected(audio, connectedPortName, portHandle)) {
+                        LOGINFO("Audio Port : [%s] is connected \n", connectedPortName.c_str());
+					    std::string portName = DSHelper::getAudioPortName(audioPortType, 0);
+					    if (portName == connectedPortName) {
+							isAudioModeChanged = true;
+                            break;
+						} else {
+							// Ignore invalid event when Audiomode set for hdmi_arc0 while no external devices connected(speaker0)
+                           TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), aPort.getName().c_str()));
+                        }
+				}
+			}
+		}
+		if (isAudioModeChanged) {
+            Exchange::IAudioOutput::AudioModes mode = DsAudioModeToSoundMode(audioMode);
             _adminLock.Lock();
             _soundMode = mode;
             _adminLock.Unlock();
             UpdateCache();
-        } else {
-            LOGERR("onAudioModeChanged: SoundMode query failed");
-        }
+        } 
     }
 
     // -------------------------------------------------------------------------
