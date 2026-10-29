@@ -102,7 +102,7 @@ namespace Plugin {
         } else {
             LOGERR("OnDeviceSettingsActivated: IDeviceSettingsAudio unavailable for Register — NO EVENTS will be received");
         }
-		dispatchEvent(EV_DS_ACTIVATED_INIT);
+		dispatchEvent(EV_DS_ACTIVATED_INIT, ParamsType{ 0, 0 });
 	}
 
     void AudioOutputImplementation::InitAtmosMetadata() {
@@ -140,13 +140,15 @@ namespace Plugin {
     void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
     {
         if (ev == EV_AUDIOMODE_CHANGE) {
-            onAudioModeChanged(params.audioPortType, params.audioMode);
+            onAudioModeChanged(static_cast<Exchange::IDeviceSettingsAudio::AudioPortType>(params.first),
+                               static_cast<Exchange::IDeviceSettingsAudio::StereoMode>(params.second));
         } else if (ev == EV_ATMOS_CAPABILITY_CHANGE) {
-            onAtmosCapabilitiesChanged(params.atmosCapability, params.atmosStatus);
+            onAtmosCapabilitiesChanged(static_cast<Exchange::IDeviceSettingsAudio::DolbyAtmosCapability>(params.first),
+                                       params.second != 0);
         } else if (ev == EV_DS_ACTIVATED_INIT) {
-			InitAtmosMetadata();	
-		}
-	}
+            InitAtmosMetadata();
+        }
+    }
 			
     void AudioOutputImplementation::OnDeviceSettingsDeactivated()
     {
@@ -287,6 +289,9 @@ namespace Plugin {
                         }
 				}
 			}
+		}
+		if (audio != nullptr) {
+			audio->Release();
 		}
 		if (isAudioModeChanged) {
             Exchange::IAudioOutput::AudioModes mode = DsAudioModeToSoundMode(audioMode);
