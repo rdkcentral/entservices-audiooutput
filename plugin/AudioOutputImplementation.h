@@ -30,6 +30,8 @@
 #include <atomic>
 #include <list>
 #include <string>
+#include <tuple>
+#include <boost/variant.hpp>
 
 // DSHelper: single COM-RPC link to the DeviceSettings plugin (IDeviceSettings root)
 // plus all DS sub-interface headers and config-store helpers.
@@ -106,6 +108,10 @@ namespace Plugin {
         };
 
     public:
+         using AudioModeParams = std::tuple<Exchange::IDeviceSettingsAudio::AudioPortType, Exchange::IDeviceSettingsAudio::StereoMode>;
+         using AtmosParams = std::tuple<Exchange::IDeviceSettingsAudio::DolbyAtmosCapability, bool>;
+         using ParamsType = boost::variant<AudioModeParams, AtmosParams, std::tuple<uint32_t>>;
+
          enum Event {
              EV_AUDIOMODE_CHANGE = 0,
              EV_ATMOS_CAPABILITY_CHANGE,
