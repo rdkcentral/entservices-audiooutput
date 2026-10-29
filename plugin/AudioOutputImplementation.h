@@ -69,14 +69,6 @@ namespace Plugin {
         void OnDeviceSettingsDeactivated() override;
 
     private:
-        // Payload for all events; only the fields matching the event are set.
-        struct ParamsType {
-            Exchange::IDeviceSettingsAudio::AudioPortType audioPortType;
-            Exchange::IDeviceSettingsAudio::StereoMode audioMode;
-            Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability;
-            bool atmosStatus;
-        };
-
         // DS Audio event delegate — receives DeviceSettings audio notifications over
         // COM-RPC and forwards them to the parent implementation.
         class DSAudioNotification : public Exchange::IDeviceSettingsAudio::INotification {
@@ -95,20 +87,16 @@ namespace Plugin {
                 Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                 bool status) override
             {
-                ParamsType params{};
-                params.atmosCapability = atmosCapability;
-                params.atmosStatus = status;
-                _parent.dispatchEvent(EV_ATMOS_CAPABILITY_CHANGE, params);
+                _parent.dispatchEvent(EV_ATMOS_CAPABILITY_CHANGE,
+                    ParamsType{ static_cast<int32_t>(atmosCapability), static_cast<int32_t>(status) });
             }
 
             void OnAudioModeEvent(
                 Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
                 Exchange::IDeviceSettingsAudio::StereoMode audioMode) override
             {
-                ParamsType params{};
-                params.audioPortType = audioPortType;
-                params.audioMode = audioMode;
-                _parent.dispatchEvent(EV_AUDIOMODE_CHANGE, params);
+                _parent.dispatchEvent(EV_AUDIOMODE_CHANGE,
+                    ParamsType{ static_cast<int32_t>(audioPortType), static_cast<int32_t>(audioMode) });
             }
 
             BEGIN_INTERFACE_MAP(DSAudioNotification)
@@ -119,35 +107,53 @@ namespace Plugin {
             AudioOutputImplementation& _parent;
         };
 
-    public:
+    private:
+        enum Event {
+            EV_AUDIOMODE_CHANGE = 0,
+            EV_ATMOS_CAPABILITY_CHANGE,
+            EV_DS_ACTIVATED_INIT
+        };
 
-         enum Event {
-             EV_AUDIOMODE_CHANGE = 0,
-             EV_ATMOS_CAPABILITY_CHANGE,
-             EV_DS_ACTIVATED_INIT
-          };
-      
-            // Worker-pool job: carries (impl*, Event, ParamsType); calls impl->Dispatch() on worker thread.
-            class EXTERNAL DispatchJob : public Core::IDispatch {
-            protected:
-                DispatchJob(AudioOutputImplementation* au, Event ev, const ParamsType& params)
-                    : _parent(au), _ev(ev), _params(params)
-                { if (_parent != nullptr) _parent->AddRef(); }
-            public:
-                DispatchJob() = delete;
-                DispatchJob(const DispatchJob&) = delete;
-                DispatchJob& operator=(const DispatchJob&) = delete;
-                ~DispatchJob() { if (_parent != nullptr) _parent->Release(); }
-                static Core::ProxyType<Core::IDispatch> Create(AudioOutputImplementation* au, Event ev, const ParamsType& params) {
-                    return Core::ProxyType<Core::IDispatch>(Core::ProxyType<DispatchJob>::Create(au, ev, params));
+        // Event payload: (port type, stereo mode) or (atmos capability, status); unused for EV_DS_ACTIVATED_INIT.
+        struct ParamsType {
+            int32_t first;
+            int32_t second;
+        };
+
+        // Worker-pool job: carries (impl*, Event, ParamsType); calls impl->Dispatch() on a worker thread.
+        class DispatchJob : public Core::IDispatch {
+        protected:
+            DispatchJob(AudioOutputImplementation* au, Event ev, const ParamsType& params)
+                : _parent(au), _ev(ev), _params(params)
+            {
+                if (_parent != nullptr) {
+                    _parent->AddRef();
                 }
-                void Dispatch() override { _parent->Dispatch(_ev, _params); }
-            private:
-                AudioOutputImplementation* _parent;
-                Event _ev;
-                const ParamsType _params;
-            };
+            }
 
+        public:
+            DispatchJob() = delete;
+            DispatchJob(const DispatchJob&) = delete;
+            DispatchJob& operator=(const DispatchJob&) = delete;
+            ~DispatchJob() override
+            {
+                if (_parent != nullptr) {
+                    _parent->Release();
+                }
+            }
+
+            static Core::ProxyType<Core::IDispatch> Create(AudioOutputImplementation* au, Event ev, const ParamsType& params)
+            {
+                return Core::ProxyType<Core::IDispatch>(Core::ProxyType<DispatchJob>::Create(au, ev, params));
+            }
+
+            void Dispatch() override { _parent->Dispatch(_ev, _params); }
+
+        private:
+            AudioOutputImplementation* _parent;
+            Event _ev;
+            const ParamsType _params;
+        };
 
     private:
         // DeviceSettings COM-RPC query helpers
@@ -164,7 +170,7 @@ namespace Plugin {
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                                         bool status);
         void Dispatch(Event ev, const ParamsType& params);
-        void dispatchEvent(Event ev, const ParamsType& params = ParamsType());
+        void dispatchEvent(Event ev, const ParamsType& params);
 
     private:
         mutable Core::CriticalSection _adminLock;
