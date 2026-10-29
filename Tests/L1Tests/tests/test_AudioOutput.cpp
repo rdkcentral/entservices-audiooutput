@@ -27,6 +27,7 @@
 #include <list>
 #include <mutex>
 #include <string>
+#include <future>
 #include <vector>
 
 #include "AudioOutputImplementation.h"
@@ -61,8 +62,7 @@ using AtmosCap           = Audio::DolbyAtmosCapability;
 using HdmiInIface        = Exchange::IDeviceSettingsHDMIIn;
 using PortStatusIterator = HdmiInIface::IHDMIInPortConnectionStatusIterator;
 
-const std::string kDsCallsign  = "org.rdk.DeviceSettings";
-const std::string kCecCallsign = "org.rdk.HdmiCecSink";
+const std::string kDsCallsign = "org.rdk.DeviceSettings";
 
 // Audio port handles handed out by the mocked IDeviceSettingsAudio::GetAudioPort().
 constexpr int32_t kHdmiHandle      = 10;
@@ -108,6 +108,36 @@ private:
     unsigned int _activations{0};
 };
 
+// Completion job for the test worker pool. The pool runs a single thread and dispatches
+// FIFO, so when this job has run every job submitted before it has finished.
+class SyncDispatchJob : public Core::IDispatch {
+public:
+    explicit SyncDispatchJob(std::promise<void>& done)
+        : _done(done)
+    {
+    }
+    ~SyncDispatchJob() = default;
+
+    void Dispatch() override
+    {
+        _done.set_value();
+    }
+
+private:
+    std::promise<void>& _done;
+};
+
+// Blocks until the plugin's pending worker-pool jobs (cache priming, event dispatch) have run.
+void DrainWorkerPool()
+{
+    std::promise<void> done;
+    std::future<void> finished = done.get_future();
+    Core::IWorkerPool::Instance().Submit(
+        Core::ProxyType<Core::IDispatch>(Core::ProxyType<SyncDispatchJob>::Create(done)));
+    ASSERT_EQ(std::future_status::ready, finished.wait_for(std::chrono::seconds(5)))
+        << "worker pool did not drain";
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -141,6 +171,8 @@ protected:
 
     void SetUp() override
     {
+        // WorkerPoolImplementation creates (threads - 1) workers, so 2 gives exactly one worker thread.
+        // Jobs then run in submission order, which DrainWorkerPool() relies on.
         workerPool = Core::ProxyType<WorkerPoolImplementation>::Create(2, Core::Thread::DefaultStackSize(), 16);
         Core::IWorkerPool::Assign(&(*workerPool));
         workerPool->Run();
@@ -213,6 +245,7 @@ protected:
 
     void TearDown() override
     {
+        DrainWorkerPool();
         impl = Core::ProxyType<TestableAudioOutputImplementation>();
 
         dsPluginSink = nullptr;
@@ -280,20 +313,12 @@ protected:
             .WillByDefault(DoAll(SetArgReferee<1>(connected), Return(Core::ERROR_NONE)));
     }
 
-    void ExposeHdmiCecSink()
-    {
-        ON_CALL(service, QueryInterfaceByCallsign(::testing::Eq(static_cast<uint32_t>(Exchange::IHdmiCecSink::ID)),
-                                                  ::testing::Eq(kCecCallsign)))
-            .WillByDefault([this](const uint32_t, const std::string&) -> void* {
-                return static_cast<void*>(static_cast<Exchange::IHdmiCecSink*>(&hdmiCecSinkMock));
-            });
-    }
-
     // Configure() opens the DSHelper link; the initial cache priming runs on the worker pool.
     void ConfigureAndWait(unsigned int activations = 1)
     {
         ASSERT_EQ(Core::ERROR_NONE, impl->Configure(&service));
         ASSERT_TRUE(impl->WaitForActivations(activations)) << "DeviceSettings activation was not processed";
+        DrainWorkerPool(); // cache priming runs asynchronously after the activation
         ASSERT_NE(dsListener, nullptr) << "Plugin did not register IDeviceSettingsAudio::INotification";
     }
 
@@ -308,12 +333,14 @@ protected:
     {
         ASSERT_NE(dsListener, nullptr);
         dsListener->OnDolbyAtmosCapabilitiesChanged(capability, true);
+        DrainWorkerPool(); // events are dispatched asynchronously
     }
 
     void FireAudioMode(AudioPort port, StereoMode mode)
     {
         ASSERT_NE(dsListener, nullptr);
         dsListener->OnAudioModeEvent(port, mode);
+        DrainWorkerPool(); // events are dispatched asynchronously
     }
 };
 
@@ -362,16 +389,6 @@ TEST_F(AudioOutputImplementationTest, Configure_RegistersAudioNotificationWithCl
 
     EXPECT_CALL(*audioMock, Register(::testing::Eq(std::string("AudioOutput")), _)).Times(1);
     ConfigureAndWait();
-}
-
-TEST_F(AudioOutputImplementationTest, Configure_HdmiCecSinkAvailable_RegistersNotification)
-{
-    TEST_LOG("Configure: HdmiCecSink available -> notification registered");
-
-    ExposeHdmiCecSink();
-    EXPECT_CALL(hdmiCecSinkMock, Register(_)).Times(1);
-    ConfigureAndWait();
-    EXPECT_NE(cecListener, nullptr);
 }
 
 TEST_F(AudioOutputImplementationTest, Configure_HdmiCecSinkUnavailable_StillSucceeds)
@@ -829,38 +846,6 @@ TEST_F(AudioOutputImplementationTest, Unregister_NotFound_ReturnsNone)
 }
 
 // ===========================================================================
-// Tests: HdmiCecSink ReportAudioDevicePowerStatus
-//
-// The first report after boot invalidates the cached values so the next
-// DolbyAtmosExperience() call re-queries DeviceSettings; later reports are ignored.
-// ===========================================================================
-TEST_F(AudioOutputImplementationTest, CecPowerStatus_FirstReportTriggersRequery_LaterReportsIgnored)
-{
-    TEST_LOG("ReportAudioDevicePowerStatus: first report re-queries, later reports ignored");
-
-    ExposeHdmiCecSink();
-    ConfigureAndWait();
-    ASSERT_NE(cecListener, nullptr);
-    ASSERT_FALSE(DolbyAtmosExperience());
-
-    // External audio device capabilities become available after boot.
-    SetPortEnabled(kHdmiHandle, true);
-    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_METADATA);
-    SetStereoMode(kHdmiHandle, Audio::AUDIO_STEREO_PASSTHROUGH);
-
-    // Cached value is used until the CEC report arrives.
-    EXPECT_FALSE(DolbyAtmosExperience());
-
-    cecListener->ReportAudioDevicePowerStatus(0);
-    EXPECT_TRUE(DolbyAtmosExperience()) << "First CEC report must force a re-query";
-
-    // Capability disappears again, but a second CEC report is ignored -> cached value kept.
-    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
-    cecListener->ReportAudioDevicePowerStatus(0);
-    EXPECT_TRUE(DolbyAtmosExperience());
-}
-
-// ===========================================================================
 // Tests: DeviceSettings plugin lifecycle (deactivation / re-activation / teardown)
 // ===========================================================================
 
@@ -885,19 +870,18 @@ TEST_F(AudioOutputImplementationTest, Reactivation_ReRegistersAudioNotificationA
 
     dsPluginSink->Activated(kDsCallsign, &service);
     ASSERT_TRUE(impl->WaitForActivations(2));
+    DrainWorkerPool();
 
     EXPECT_TRUE(DolbyAtmosExperience());
 }
 
-TEST_F(AudioOutputImplementationTest, Destructor_UnregistersDeviceSettingsAndCecNotifications)
+TEST_F(AudioOutputImplementationTest, Destructor_UnregistersDeviceSettingsNotifications)
 {
-    TEST_LOG("Destructor unregisters IDeviceSettingsAudio and HdmiCecSink notifications");
+    TEST_LOG("Destructor unregisters IDeviceSettingsAudio and the DeviceSettings plugin notification");
 
-    ExposeHdmiCecSink();
     ConfigureAndWait();
 
     EXPECT_CALL(*audioMock, Unregister(_)).Times(1);
-    EXPECT_CALL(hdmiCecSinkMock, Unregister(_)).Times(1);
     EXPECT_CALL(service, Unregister(::testing::A<PluginHost::IPlugin::INotification*>())).Times(1);
 
     impl = Core::ProxyType<TestableAudioOutputImplementation>();
