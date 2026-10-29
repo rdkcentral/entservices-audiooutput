@@ -143,6 +143,7 @@ namespace Plugin {
 
         void SendNotify(bool dolbyAtmosExperience);
         void UpdateCache();
+        void InitAtmosMetadata();
         void onAudioModeChanged(Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
                                 Exchange::IDeviceSettingsAudio::StereoMode audioMode);
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,

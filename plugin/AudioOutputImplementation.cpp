@@ -102,7 +102,7 @@ namespace Plugin {
         } else {
             LOGERR("OnDeviceSettingsActivated: IDeviceSettingsAudio unavailable for Register — NO EVENTS will be received");
         }
-		_parent.dispatchEvent(EV_DS_ACTIVATED_INIT, std::make_tuple(static_cast<uint32_t>(0)));
+		dispatchEvent(EV_DS_ACTIVATED_INIT, std::make_tuple(static_cast<uint32_t>(0)));
 	}
 
     void AudioOutputImplementation::InitAtmosMetadata() {
@@ -125,7 +125,7 @@ namespace Plugin {
         _adminLock.Unlock();
 
         UpdateCache();
-        LOGINFO("AudioOutputImplementation::OnDeviceSettingsActivated COMPLETE: "
+        LOGINFO("AudioOutputImplementation::InitAtmosMetadata : "
                 "dolbyAtmosExperience=%s, soundMode=%d (atmosFailed=%s, soundModeFailed=%s)",
                 _dolbyAtmosExperience ? "true" : "false", mode,
                 _atmosMetadataInitFailed ? "yes" : "no",
@@ -274,14 +274,13 @@ namespace Plugin {
                 static_cast<int>(audioPortType), static_cast<int>(audioMode));
 		bool isAudioModeChanged = false;
         auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
-        if (audio != nullptr) {
-            for (const auto& kv : DSHelper::getAudioPortHandleEntries()) {
-                const std::string& connectedPortName = kv.first;
-                int32_t portHandle = kv.second;
-                if (DSHelper::isAudioOutputPortConnected(audio, connectedPortName, portHandle)) {
-                        LOGINFO("Audio Port : [%s] is connected \n", connectedPortName.c_str());
-					    std::string portName = DSHelper::getAudioPortName(audioPortType, 0);
-					    if (portName == connectedPortName) {
+		std::vector<AudioPortEntry> entries;
+        if (audio != nullptr && DSHelper::getAudioPortEntries(entries)) {
+            for (const AudioPortEntry& e : entries) {
+                int32_t portHandle = INVALID_DS_HANDLE;
+                if (DSHelper::isAudioOutputPortConnected(audio, e.name, portHandle)) {
+                        LOGINFO("Audio Port : [%s] is connected \n", e.name.c_str());
+					    if (e.type == audioPortType) {
 							isAudioModeChanged = true;
                             break;
 						} else {
