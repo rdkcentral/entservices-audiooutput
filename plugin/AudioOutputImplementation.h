@@ -30,8 +30,6 @@
 #include <atomic>
 #include <list>
 #include <string>
-#include <tuple>
-#include <boost/variant.hpp>
 
 // DSHelper: single COM-RPC link to the DeviceSettings plugin (IDeviceSettings root)
 // plus all DS sub-interface headers and config-store helpers.
@@ -71,6 +69,14 @@ namespace Plugin {
         void OnDeviceSettingsDeactivated() override;
 
     private:
+        // Payload for all events; only the fields matching the event are set.
+        struct ParamsType {
+            Exchange::IDeviceSettingsAudio::AudioPortType audioPortType{};
+            Exchange::IDeviceSettingsAudio::StereoMode audioMode{};
+            Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability{};
+            bool atmosStatus{false};
+        };
+
         // DS Audio event delegate — receives DeviceSettings audio notifications over
         // COM-RPC and forwards them to the parent implementation.
         class DSAudioNotification : public Exchange::IDeviceSettingsAudio::INotification {
@@ -89,14 +95,20 @@ namespace Plugin {
                 Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                 bool status) override
             {
-                _parent.dispatchEvent(EV_ATMOS_CAPABILITY_CHANGE, std::make_tuple(atmosCapability, status));
+                ParamsType params;
+                params.atmosCapability = atmosCapability;
+                params.atmosStatus = status;
+                _parent.dispatchEvent(EV_ATMOS_CAPABILITY_CHANGE, params);
             }
 
             void OnAudioModeEvent(
                 Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
                 Exchange::IDeviceSettingsAudio::StereoMode audioMode) override
             {
-                _parent.dispatchEvent(EV_AUDIOMODE_CHANGE, std::make_tuple(audioPortType, audioMode));
+                ParamsType params;
+                params.audioPortType = audioPortType;
+                params.audioMode = audioMode;
+                _parent.dispatchEvent(EV_AUDIOMODE_CHANGE, params);
             }
 
             BEGIN_INTERFACE_MAP(DSAudioNotification)
@@ -108,9 +120,6 @@ namespace Plugin {
         };
 
     public:
-         using AudioModeParams = std::tuple<Exchange::IDeviceSettingsAudio::AudioPortType, Exchange::IDeviceSettingsAudio::StereoMode>;
-         using AtmosParams = std::tuple<Exchange::IDeviceSettingsAudio::DolbyAtmosCapability, bool>;
-         using ParamsType = boost::variant<AudioModeParams, AtmosParams, std::tuple<uint32_t>>;
 
          enum Event {
              EV_AUDIOMODE_CHANGE = 0,
