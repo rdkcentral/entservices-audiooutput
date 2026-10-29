@@ -102,7 +102,10 @@ namespace Plugin {
         } else {
             LOGERR("OnDeviceSettingsActivated: IDeviceSettingsAudio unavailable for Register — NO EVENTS will be received");
         }
+		_parent.dispatchEvent(EV_DS_ACTIVATED_INIT, std::make_tuple(static_cast<uint32_t>(0)));
+	}
 
+    void AudioOutputImplementation::InitAtmosMetadata() {
         // Prime the cache now that DeviceSettings is guaranteed active.
         bool cap = false;
         _atmosMetadataInitFailed = (AtmosMetadata(cap) != Core::ERROR_NONE);
@@ -129,6 +132,24 @@ namespace Plugin {
                 _soundModeInitFailed ? "yes" : "no");
     }
 
+    void AudioOutputImplementation::dispatchEvent(Event ev, const ParamsType& params)
+    {
+        Core::IWorkerPool::Instance().Submit(DispatchJob::Create(this, ev, params));
+    }
+
+    void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
+    {
+        if (ev == EV_AUDIOMODE_CHANGE) {
+            auto t = boost::get<std::tuple<uint32_t, uint32_t>>(params);
+            onAudioModeChanged(std::get<0>(t), std::get<1>(t));
+        } else if (ev == EV_ATMOS_CAPABILITY_CHANGE) {
+            auto t = boost::get<std::tuple<uint32_t>>(params);
+            onAtmosCapabilitiesChanged(std::get<0>(t), std::get<1>(t));
+        } else if (ev == EV_DS_ACTIVATED_INIT) {
+			InitAtmosMetadata();	
+		}
+	}
+			
     void AudioOutputImplementation::OnDeviceSettingsDeactivated()
     {
         LOGINFO("AudioOutputImplementation: OnDeviceSettingsDeactivated");
