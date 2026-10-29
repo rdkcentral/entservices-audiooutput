@@ -106,10 +106,11 @@ namespace Plugin {
         };
 
     public:
-      enum Event {
-                EV_AUDIOMODE_CHANGE = 0,
-                EV_ATMOS_CAPABILITY_CHANGE,
-      };
+         enum Event {
+             EV_AUDIOMODE_CHANGE = 0,
+             EV_ATMOS_CAPABILITY_CHANGE,
+             EV_DS_ACTIVATED_INIT
+          };
       
             // Worker-pool job: carries (impl*, Event, ParamsType); calls impl->Dispatch() on worker thread.
             class EXTERNAL DispatchJob : public Core::IDispatch {
@@ -147,6 +148,7 @@ namespace Plugin {
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                                         bool status);
         void Dispatch(Event ev, const ParamsType& params);
+        void dispatchEvent(Event ev, const ParamsType& params = ParamsType());
 
     private:
         mutable Core::CriticalSection _adminLock;
