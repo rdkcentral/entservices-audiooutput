@@ -841,7 +841,7 @@ namespace Plugin {
           hdmiArcVolumeLevel = volumeLevel;
           JsonObject volParams;
           volParams["volumeLevel"] = (int)hdmiArcVolumeLevel;
-	  volParams["audioPort"] = "HDMI_ARC0";
+	      volParams["audioPort"] = "HDMI_ARC0";
           dispatchEvent(AUDIOOUTPUT_EVT_ONVOLUMELEVELCHANGED, volParams);
      }
 
@@ -854,10 +854,18 @@ namespace Plugin {
            hdmiArcMuteStatus = bMuteStatus;
            JsonObject params;
            params["muted"] = hdmiArcMuteStatus;
-	   params["audioPort"] = "HDMI_ARC0";
-	   dispatchEvent(AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED, params);
+	       params["audioPort"] = "HDMI_ARC0";
+	       dispatchEvent(AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED, params);
        }
     } 
+
+    void AudioOutputImplementation::onAudioDeviceConnectedStatusEventHandler(string status, string audioDeviceConnected)
+    {
+        LOGINFO("ARC audio device connection status changed: status=%s, audioDeviceConnected=%s", status.c_str(), audioDeviceConnected.c_str());
+        //Reset to initial value incase of disconnection
+        hdmiArcVolumeLevel = 0;
+        hdmiArcMuteStatus = false;
+    }
 
 } // namespace Plugin
 } // namespace WPEFramework

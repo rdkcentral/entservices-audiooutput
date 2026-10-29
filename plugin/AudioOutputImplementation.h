@@ -58,10 +58,10 @@ namespace Plugin {
 
         // IAudioOutput
         Core::hresult DolbyAtmosExperience(bool& enabled /* @out */) const override;
-	Core::hresult SetVolumeLevel(const string& audioPort, const uint32_t& volumeLevel, bool& success /* @out */) override;
-	Core::hresult SetMuted(const string& audioPort, const bool muted, bool& success /* @out */) override;
-	Core::hresult GetVolumeLevel(const string& audioPort, string& affectedAudioPort /* @out */, int& volumeLevel /* @out */, bool& success /* @out */) override;
-	Core::hresult GetMuted(const string& audioPort, string& affectedAudioPort /* @out */, bool& muted /* @out */, bool& success /* @out */) override;
+	    Core::hresult SetVolumeLevel(const string& audioPort, const uint32_t& volumeLevel, bool& success /* @out */) override;
+	    Core::hresult SetMuted(const string& audioPort, const bool muted, bool& success /* @out */) override;
+	    Core::hresult GetVolumeLevel(const string& audioPort, string& affectedAudioPort /* @out */, int& volumeLevel /* @out */, bool& success /* @out */) override;
+	    Core::hresult GetMuted(const string& audioPort, string& affectedAudioPort /* @out */, bool& muted /* @out */, bool& success /* @out */) override;
         Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
         //Core::hresult GetSupportedAudioConfigs(Exchange::IAudioOutput::IAudioConfigListIterator*& audioConfigs /* @out */)  const override;
@@ -105,7 +105,7 @@ namespace Plugin {
             }
 
             BEGIN_INTERFACE_MAP(DSAudioNotification)
-                INTERFACE_ENTRY(Exchange::IDeviceSettingsAudio::INotification)
+            INTERFACE_ENTRY(Exchange::IDeviceSettingsAudio::INotification)
             END_INTERFACE_MAP
 
         private:
@@ -126,34 +126,38 @@ namespace Plugin {
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                                         bool status);
        
-	// inside AudioOutputImplementation (private section):
-	class CecSinkNotification : public Exchange::IHdmiCecSink::INotification {
-	private:
-	    CecSinkNotification(const CecSinkNotification&) = delete;
-	    CecSinkNotification& operator=(const CecSinkNotification&) = delete;
+	    // inside AudioOutputImplementation (private section):
+	    class CecSinkNotification : public Exchange::IHdmiCecSink::INotification {
+	    private:
+	        CecSinkNotification(const CecSinkNotification&) = delete;
+	        CecSinkNotification& operator=(const CecSinkNotification&) = delete;
 
-	public:
-	    explicit CecSinkNotification(AudioOutputImplementation& parent) : _parent(parent) {}
-	    ~CecSinkNotification() override = default;
+	    public:
+            explicit CecSinkNotification(AudioOutputImplementation& parent) : _parent(parent) {}
+            ~CecSinkNotification() override = default;
 
-	    // The ONE event you care about — forward it to the parent
-	    void ReportAudioStatusEvent(const int muteStatus, const int volumeLevel) override {
-	        _parent.OnArcAudioStatusChanged(muteStatus, volumeLevel);
-    	    }
+            // The ONE event you care about — forward it to the parent
+            void ReportAudioStatusEvent(const int muteStatus, const int volumeLevel) override {
+                _parent.OnArcAudioStatusChanged(muteStatus, volumeLevel);
+                }
+            
+            void ReportAudioDeviceConnectedStatus(const string status, const string audioDeviceConnected) override
+            {
+                _parent.onAudioDeviceConnectedStatusEventHandler(status,  audioDeviceConnected);
+            }
+        
+            BEGIN_INTERFACE_MAP(CecSinkNotification)
+            INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
+            END_INTERFACE_MAP
 
-
-	    BEGIN_INTERFACE_MAP(CecSinkNotification)
-           INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
-    	    END_INTERFACE_MAP
-
-	private:
-	    AudioOutputImplementation& _parent;
-	};
+        private:
+            AudioOutputImplementation& _parent;
+        };
 
 	public:
 		enum Event {
     			AUDIOOUTPUT_EVT_ONVOLUMELEVELCHANGED,
-			AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED		
+			    AUDIOOUTPUT_EVT_ONMUTESTATUSCHANGED		
 		     };
 
         class EXTERNAL Job : public Core::IDispatch {
@@ -192,7 +196,7 @@ namespace Plugin {
 
             private:
                 AudioOutputImplementation *_audioOutputImplementation;
-		const Event _event;
+		        const Event _event;
                 JsonObject _params;
         };
 
@@ -208,25 +212,26 @@ namespace Plugin {
         mutable std::atomic<bool> _atmosMetadataInitFailed{false};
         mutable std::atomic<bool> _soundModeInitFailed{false};
 	
-	void unsubscribeFromCecSink();
-	void subscribeToCecSink();	
-	// new: handles ARC audio status from HdmiCecSink
+        void unsubscribeFromCecSink();
+        void subscribeToCecSink();	
+        // new: handles ARC audio status from HdmiCecSink
         void OnArcAudioStatusChanged(int muteStatus, int volumeLevel);
-	//Notification dispatch method
-	void dispatchEvent(Event, const JsonObject &params);
+        void onAudioDeviceConnectedStatusEventHandler(string status, string audioDeviceConnected);
+        //Notification dispatch method
+        void dispatchEvent(Event, const JsonObject &params);
         void Dispatch(Event event, const JsonObject &params);
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
-	
-	PluginHost::IShell* m_shellService { nullptr };
+        
+        PluginHost::IShell* m_shellService { nullptr };
         // DeviceSettings audio event delegate (COM-RPC)
         Core::Sink<DSAudioNotification> _dsAudioNotification{*this};
-	// new — HdmiCecSink subscription
+        // new — HdmiCecSink subscription
         Core::Sink<CecSinkNotification> _cecSinkNotification{*this};   // the delegate you Register
         Exchange::IHdmiCecSink* _cecSink { nullptr };
 
     public:
-	friend class Job;
+        friend class Job;
     };
 
 } // namespace Plugin
