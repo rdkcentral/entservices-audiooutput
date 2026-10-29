@@ -55,7 +55,7 @@ cd ..
 git clone --branch develop https://github.com/rdkcentral/entservices-helpers.git
 cd "$GITHUB_WORKSPACE"
 
-git clone --branch 2.0.11 https://github.com/rdkcentral/entservices-testframework.git
+git clone --branch 2.1.2 https://github.com/rdkcentral/entservices-testframework.git
 
 ############################
 # Build Thunder-Tools
@@ -139,7 +139,6 @@ cd entservices-testframework/Tests
 echo " Empty mocks creation to avoid compilation errors"
 echo "======================================================================================"
 mkdir -p headers
-mkdir -p headers/rdk/ds
 mkdir -p headers/audiocapturemgr
 mkdir -p headers/libusb
 echo "dir created successfully"
@@ -149,29 +148,6 @@ echo "==========================================================================
 echo "empty headers creation"
 cd headers
 echo "current working dir: "${PWD}
-touch rdk/ds/host.hpp
-touch rdk/ds/list.hpp
-touch rdk/ds/hdmiIn.hpp
-touch rdk/ds/manager.hpp
-touch rdk/ds/exception.hpp
-touch rdk/ds/dsAudio.h
-touch rdk/ds/dsError.h
-touch rdk/ds/dsMgr.h
-touch rdk/ds/dsTypes.h
-touch rdk/ds/dsUtl.h
-touch rdk/ds/audioOutputPort.hpp
-touch rdk/ds/audioOutputPortType.hpp
-touch rdk/ds/audioOutputPortConfig.hpp
-touch rdk/ds/audioStereoMode.hpp
-touch rdk/ds/sleepMode.hpp
-touch rdk/ds/videoDevice.hpp
-touch rdk/ds/videoOutputPort.hpp
-touch rdk/ds/videoOutputPortConfig.hpp
-touch rdk/ds/videoOutputPortType.hpp
-touch rdk/ds/videoResolution.hpp
-touch rdk/ds/audioOutputPortType.hpp
-touch rdk/ds/audioOutputPortConfig.hpp
-touch rdk/ds/pixelResolution.hpp
 touch edid-parser.hpp
 mkdir -p Dobby/Public/Dobby
 mkdir -p Dobby/IpcService

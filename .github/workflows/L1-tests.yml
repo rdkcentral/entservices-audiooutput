@@ -35,7 +35,7 @@ env:
   THUNDER_TOOLS_COMMIT_SHA: "d5dd83c7c19c49c7f25c558c126500bd2d64f7a4"
   THUNDER_COMMIT_SHA: "2c0fcc5529e7da734be558ca6efa05d934dcce31"
   INTERFACES_REF: "4.2.5"
-  TESTFRAMEWORK_REF: "2.0.11"
+  TESTFRAMEWORK_REF: "2.1.2"
   RDK_SERVICES_L1_TEST: "ON"
   ENABLE_CACHE: "false"
 
@@ -72,10 +72,10 @@ jobs:
         with:
           cmake-version: '3.16.x'
 
-      # audiooutput only needs DS HAL, no sqlite/websocket/grpc/boost
+      # audiooutput only needs the DeviceSettings COM-RPC mocks, no sqlite/websocket/grpc/boost
       # libcunit1/libcunit1-dev: trower-base64 meson build
       # libcurl4-openssl-dev: entservices-helpers utils.cpp includes curl/curl.h
-      # libdrm-dev: devicesettings.h -> xf86drmMode.h -> drm.h
+      # libdrm-dev: testframework drm mock (drm.h)
       - name: Install packages
         run: >
           sudo apt update
@@ -220,7 +220,7 @@ jobs:
           &&
           cmake --install build/entservices-apis
 
-      # Generate empty stub headers for DS HAL types and IARMBus.
+      # Generate empty stub headers for IARMBus and testframework mocks.
       # Only the headers actually needed by AudioOutputImplementation.cpp
       # (no systemservices-specific headers like proc/readproc.h, btmgr.h, etc.).
       - name: Generate external headers
@@ -229,7 +229,6 @@ jobs:
           &&
           mkdir -p
           headers
-          headers/rdk/ds
           headers/rdk/iarmbus
           headers/rdk/iarmmgrs-hal
           headers/rdk/halif/deepsleep-manager
@@ -240,29 +239,6 @@ jobs:
           cd headers
           &&
           touch
-          rdk/ds/host.hpp
-          rdk/ds/list.hpp
-          rdk/ds/manager.hpp
-          rdk/ds/exception.hpp
-          rdk/ds/audioOutputPort.hpp
-          rdk/ds/audioOutputPortType.hpp
-          rdk/ds/audioOutputPortConfig.hpp
-          rdk/ds/audioStereoMode.hpp
-          rdk/ds/AudioStereoMode.hpp
-          rdk/ds/dsAudio.h
-          rdk/ds/dsError.h
-          rdk/ds/dsMgr.h
-          rdk/ds/dsTypes.h
-          rdk/ds/dsUtl.h
-          rdk/ds/videoOutputPort.hpp
-          rdk/ds/videoOutputPortConfig.hpp
-          rdk/ds/videoOutputPortType.hpp
-          rdk/ds/videoResolution.hpp
-          rdk/ds/videoDevice.hpp
-          rdk/ds/hdmiIn.hpp
-          rdk/ds/compositeIn.hpp
-          rdk/ds/sleepMode.hpp
-          rdk/ds/pixelResolution.hpp
           rdk/iarmbus/libIARM.h
           rdk/iarmbus/libIBus.h
           rdk/iarmbus/libIBusDaemon.h
@@ -366,7 +342,6 @@ jobs:
           -DTHUNDER_VERSION_MINOR=4
           -DRDK_SERVICES_L1_TEST
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/ds
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/audiocapturemgr
@@ -377,7 +352,6 @@ jobs:
           -I$GITHUB_WORKSPACE/entservices-helpers/helpers
           -I$GITHUB_WORKSPACE/install/usr/include
           -I$GITHUB_WORKSPACE/install/usr/include/WPEFramework
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/devicesettings.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h
@@ -412,7 +386,6 @@ jobs:
           -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
           -DCOMCAST_CONFIG=OFF
-          -DDS_FOUND=ON
           -DPLUGIN_AUDIOOUTPUT=ON
           -DRDK_SERVICES_L1_TEST=ON
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
@@ -425,7 +398,6 @@ jobs:
           -DTHUNDER_VERSION_MINOR=4
           -DRDK_SERVICES_L1_TEST
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/ds
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/audiocapturemgr
@@ -435,8 +407,6 @@ jobs:
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/thunder
           -I$GITHUB_WORKSPACE/entservices-helpers/helpers
           -I$GITHUB_WORKSPACE/install/usr/include
-          -I./usr/include/libdrm
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/devicesettings.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h
@@ -504,7 +474,6 @@ jobs:
           -DTHUNDER_VERSION_MAJOR=4
           -DTHUNDER_VERSION_MINOR=4
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers
-          -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/ds
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
           -I$GITHUB_WORKSPACE/entservices-testframework/Tests/headers/audiocapturemgr
@@ -516,8 +485,6 @@ jobs:
           -I$GITHUB_WORKSPACE/Thunder/Source/core
           -I$GITHUB_WORKSPACE/install/usr/include
           -I$GITHUB_WORKSPACE/install/usr/include/WPEFramework
-          -I./usr/include/libdrm
-          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/devicesettings.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h
@@ -539,7 +506,6 @@ jobs:
           -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
           -DCMAKE_DISABLE_FIND_PACKAGE_RBus=ON
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DDS_FOUND=ON
           -DPLUGIN_AUDIOOUTPUT=ON
           -DRDK_SERVICES_L1_TEST=${{ env.RDK_SERVICES_L1_TEST }}
           -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
