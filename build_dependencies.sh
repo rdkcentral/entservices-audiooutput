@@ -49,8 +49,7 @@ git clone --branch R4_4-RDK https://github.com/rdkcentral/ThunderTools.git
 
 git clone --branch R4_4-RDK https://github.com/rdkcentral/Thunder.git
 
-git clone https://github.com/rdkcentral/entservices-apis.git
-git -C entservices-apis checkout 25c9a97842bf22461a41707c69703dc07f98fed5
+git clone --branch develop https://github.com/rdkcentral/entservices-apis.git
 
 cd ..
 git clone --branch develop https://github.com/rdkcentral/entservices-helpers.git
