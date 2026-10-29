@@ -265,7 +265,7 @@ namespace Plugin {
                             break;
 						} else {
 							// Ignore invalid event when Audiomode set for hdmi_arc0 while no external devices connected(speaker0)
-                           TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), aPort.getName().c_str()));
+                           TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), e.name.c_str()));
                         }
 				}
 			}
