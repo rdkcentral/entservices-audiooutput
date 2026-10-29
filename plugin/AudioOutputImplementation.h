@@ -146,6 +146,7 @@ namespace Plugin {
                                 Exchange::IDeviceSettingsAudio::StereoMode audioMode);
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                                         bool status);
+        void Dispatch(Event ev, const ParamsType& params);
 
     private:
         mutable Core::CriticalSection _adminLock;
