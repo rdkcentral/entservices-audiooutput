@@ -352,12 +352,18 @@ namespace Plugin {
         if (TV == searchRdkProfile()) {
             // TV platform: use persisted user-intent enable state — HAL state is unreliable on some platforms
             bool arcEnabled = false;
-            if (arcHandle != INVALID_DS_HANDLE) {
-                string portName = "HDMI_ARC0";
-                audio->GetAudioEnablePersist(arcHandle, arcEnabled, portName);
-                LOGINFO("AtmosMetadata: GetAudioEnablePersist(HDMI_ARC0) = %s", arcEnabled ? "true" : "false");
+			Core::SystemInfo::SetEnvironment(_T("THUNDER_ACCESS"), _T("127.0.0.1:9998"));
+            WPEFramework::JSONRPC::LinkType<Core::JSON::IElement> dsClient(
+                _T("org.rdk.DisplaySettings.1"), _T("org.rdk.DisplaySettings.1"), false, _T(""));
+            JsonObject params;
+            JsonObject result;
+            params["audioPort"] = "HDMI_ARC0";
+            if (dsClient.Invoke<JsonObject, JsonObject>(2000, "getEnableAudioPort", params, result) == Core::ERROR_NONE) {
+                arcEnabled = result["enable"].Boolean();
+                LOGINFO("AtmosMetadata: getEnableAudioPort(HDMI_ARC0) = %s", arcEnabled ? "true" : "false");
+            } else {
+                LOGWARN("AtmosMetadata: getEnableAudioPort JSON-RPC failed");
             }
-
             Exchange::IDeviceSettingsAudio::DolbyAtmosCapability capability = Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
             if (arcEnabled && arcHandle != INVALID_DS_HANDLE) {
                 // ARC is enabled — query HDMI_ARC0 for ATMOS capability
@@ -378,6 +384,7 @@ namespace Plugin {
             LOGINFO("AtmosMetadata: capability=%d, supported=%s",
                     static_cast<int>(capability), supported ? "true" : "false");
         } else {
+            LOGINFO("AtmosMetadata: STB platform");
             // STB platform: keep port-priority logic (HDMI_ARC > HDMI > SPEAKER)
             int32_t selectedHandle = INVALID_DS_HANDLE;
             bool    arcConnected   = false;
