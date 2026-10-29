@@ -140,10 +140,10 @@ namespace Plugin {
     void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
     {
         if (ev == EV_AUDIOMODE_CHANGE) {
-            auto t = boost::get<std::tuple<uint32_t, uint32_t>>(params);
+            auto t = boost::get<AudioModeParams>(params);
             onAudioModeChanged(std::get<0>(t), std::get<1>(t));
         } else if (ev == EV_ATMOS_CAPABILITY_CHANGE) {
-            auto t = boost::get<std::tuple<uint32_t>>(params);
+            auto t = boost::get<AtmosParams>(params);
             onAtmosCapabilitiesChanged(std::get<0>(t), std::get<1>(t));
         } else if (ev == EV_DS_ACTIVATED_INIT) {
 			InitAtmosMetadata();	
