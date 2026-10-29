@@ -102,7 +102,7 @@ namespace Plugin {
         } else {
             LOGERR("OnDeviceSettingsActivated: IDeviceSettingsAudio unavailable for Register — NO EVENTS will be received");
         }
-		dispatchEvent(EV_DS_ACTIVATED_INIT, std::make_tuple(static_cast<uint32_t>(0)));
+		dispatchEvent(EV_DS_ACTIVATED_INIT, ParamsType{ 0, 0 });
 	}
 
     void AudioOutputImplementation::InitAtmosMetadata() {
@@ -140,15 +140,15 @@ namespace Plugin {
     void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
     {
         if (ev == EV_AUDIOMODE_CHANGE) {
-            auto t = boost::get<std::tuple<uint32_t, uint32_t>>(params);
-            onAudioModeChanged(std::get<0>(t), std::get<1>(t));
+            onAudioModeChanged(static_cast<Exchange::IDeviceSettingsAudio::AudioPortType>(params.first),
+                               static_cast<Exchange::IDeviceSettingsAudio::StereoMode>(params.second));
         } else if (ev == EV_ATMOS_CAPABILITY_CHANGE) {
-            auto t = boost::get<std::tuple<uint32_t>>(params);
-            onAtmosCapabilitiesChanged(std::get<0>(t), std::get<1>(t));
+            onAtmosCapabilitiesChanged(static_cast<Exchange::IDeviceSettingsAudio::DolbyAtmosCapability>(params.first),
+                                       params.second != 0);
         } else if (ev == EV_DS_ACTIVATED_INIT) {
-			InitAtmosMetadata();	
-		}
-	}
+            InitAtmosMetadata();
+        }
+    }
 			
     void AudioOutputImplementation::OnDeviceSettingsDeactivated()
     {
@@ -285,10 +285,13 @@ namespace Plugin {
                             break;
 						} else {
 							// Ignore invalid event when Audiomode set for hdmi_arc0 while no external devices connected(speaker0)
-                           TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), aPort.getName().c_str()));
+                           TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), e.name.c_str()));
                         }
 				}
 			}
+		}
+		if (audio != nullptr) {
+			audio->Release();
 		}
 		if (isAudioModeChanged) {
             Exchange::IAudioOutput::AudioModes mode = DsAudioModeToSoundMode(audioMode);
