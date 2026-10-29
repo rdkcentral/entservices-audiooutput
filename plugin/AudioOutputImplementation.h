@@ -71,10 +71,10 @@ namespace Plugin {
     private:
         // Payload for all events; only the fields matching the event are set.
         struct ParamsType {
-            Exchange::IDeviceSettingsAudio::AudioPortType audioPortType{};
-            Exchange::IDeviceSettingsAudio::StereoMode audioMode{};
-            Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability{};
-            bool atmosStatus{false};
+            Exchange::IDeviceSettingsAudio::AudioPortType audioPortType;
+            Exchange::IDeviceSettingsAudio::StereoMode audioMode;
+            Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability;
+            bool atmosStatus;
         };
 
         // DS Audio event delegate — receives DeviceSettings audio notifications over
@@ -95,7 +95,7 @@ namespace Plugin {
                 Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                 bool status) override
             {
-                ParamsType params;
+                ParamsType params{};
                 params.atmosCapability = atmosCapability;
                 params.atmosStatus = status;
                 _parent.dispatchEvent(EV_ATMOS_CAPABILITY_CHANGE, params);
@@ -105,7 +105,7 @@ namespace Plugin {
                 Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
                 Exchange::IDeviceSettingsAudio::StereoMode audioMode) override
             {
-                ParamsType params;
+                ParamsType params{};
                 params.audioPortType = audioPortType;
                 params.audioMode = audioMode;
                 _parent.dispatchEvent(EV_AUDIOMODE_CHANGE, params);
