@@ -153,6 +153,13 @@ jobs:
           path: entservices-testframework
           ref: ${{ env.TESTFRAMEWORK_REF }}
 
+      - name: Checkout entservices-devicesettings
+        uses: actions/checkout@v3
+        with:
+          repository: rdkcentral/entservices-devicesettings
+          path: entservices-devicesettings
+          ref: topic/RDKEMW-25013    
+
       - name: Checkout entservices-audiooutput
         if: ${{ inputs.caller_source == 'local' }}
         uses: actions/checkout@v3
@@ -413,6 +420,51 @@ jobs:
           cmake --build build/entservices-helpers
           &&
           cmake --install build/entservices-helpers
+
+      - name: Build entservices-devicesettings
+        run: >
+          cmake
+          -S "$GITHUB_WORKSPACE/entservices-devicesettings"
+          -B build/entservices-devicesettings
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
+          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
+          -DCMAKE_CXX_FLAGS="
+          -DEXCEPTIONS_ENABLE=ON
+          -DUSE_THUNDER_R4=ON
+          -DTHUNDER_VERSION=4
+          -DTHUNDER_VERSION_MAJOR=4
+          -DTHUNDER_VERSION_MINOR=4
+          -DDS_MGR_EVENTID_T_PROVIDED_BY_DEVICESETTINGS
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/systemservices
+          -I $GITHUB_WORKSPACE/install/usr/include
+          -I $GITHUB_WORKSPACE/install/usr/include/WPEFramework
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks
+          -I $GITHUB_WORKSPACE/entservices-helpers/helpers
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/maintenanceMGR.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Telemetry.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/secure_wrappermock.h
+          -Wall -Wno-unused-result -Wno-deprecated-declarations -Wno-error=format=
+          -DUSE_IARMBUS
+          -DUSE_DS"
+          -DCOMCAST_CONFIG=OFF
+          -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
+          -DDS_FOUND=ON
+          -DPLUGIN_DEVICESETTINGS=ON
+          -DPLUGIN_DEVICESETTINGS_MODE=Off
+          -DUSE_THUNDER_R4=ON
+          -DRDK_SERVICE_L2_TEST=ON
+          -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+          &&
+          cmake --build build/entservices-devicesettings -j8
+          &&
+          cmake --install build/entservices-devicesettings    
 
       # Build entservices-audiooutput with the L2 test shared library.
       # -DPLUGIN_L2Tests=ON    → builds Tests/L2Tests/CMakeLists.txt
