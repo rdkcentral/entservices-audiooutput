@@ -92,6 +92,7 @@ protected:
 
     uint32_t CreateAudioOutputInterfaceObjectUsingComRPCConnection();
 
+    std::unique_ptr<::testing::NiceMock<DsAudioHalMock>> mDsAudioHalMock;
     dsAtmosCapsChangeCB_t mAtmosCapsChangeCB{nullptr};
     void ConfigureDsAudioHalDefaults();
 };
@@ -102,6 +103,8 @@ AudioOutputL2Test::AudioOutputL2Test()
     TEST_LOG("AudioOutputL2Test constructor");
 
     // HAL defaults must be installed before DeviceSettings activates and registers its callbacks
+    mDsAudioHalMock = std::make_unique<::testing::NiceMock<DsAudioHalMock>>();
+    DsAudioApi::setImpl(mDsAudioHalMock.get());
     ConfigureDsAudioHalDefaults();
     uint32_t dsStatus = ActivateServiceWithRetry(_T("org.rdk.DeviceSettings"), 3, 500);
     EXPECT_EQ(Core::ERROR_NONE, dsStatus) << "Failed to activate DeviceSettings plugin";
@@ -123,6 +126,8 @@ AudioOutputL2Test::~AudioOutputL2Test()
     DeactivateService(AUDIOOUTPUT_CALLSIGN);
 
     DeactivateService(_T("org.rdk.DeviceSettings"));
+    DsAudioApi::setImpl(nullptr);
+    mDsAudioHalMock.reset();
 }
 
 void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
