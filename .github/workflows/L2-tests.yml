@@ -608,6 +608,7 @@ jobs:
       # ---- Minimal filesystem setup ----------------------------------------
       # AudioOutput plugin does not write to /opt or /lib/rdk at startup —
       # only needs Thunder config dirs and tmp dirs for PersistentStore paths.
+      # RDK_PROFILE=TV below makes DeviceSettings register the HDMI-In hot plug HAL callback.
       - name: Set up files
         run: >
           sudo mkdir -p -m 777
@@ -623,6 +624,8 @@ jobs:
           /etc/device.properties
           &&
           echo "BUILD_TYPE=VBN" | sudo tee /etc/device.properties
+          &&
+          echo "RDK_PROFILE=TV" | sudo tee -a /etc/device.properties
 
       # Remove the Platform precondition from AudioOutput.json so the plugin
       # can be activated without a Platform subsystem provider (e.g., PowerManager).
