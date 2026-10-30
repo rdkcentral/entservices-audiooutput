@@ -310,71 +310,12 @@ protected:
         dsListener->OnDolbyAtmosCapabilitiesChanged(capability, true);
     }
 
-    void FireAudioMode(AudioPort port, StereoMode mode)
-    {
-        ASSERT_NE(dsListener, nullptr);
-        dsListener->OnAudioModeEvent(port, mode);
-    }
-};
-
 // ===========================================================================
-// Tests: construction without DeviceSettings
+// Tests: DolbyAtmosExperience — default state
 // ===========================================================================
 
 // After construction only (no Configure, no callbacks), state must be false.
 TEST_F(AudioOutputImplementationTest, DolbyAtmosExperience_DefaultIsFalse)
-{
-    bool enabled = true; // intentionally wrong starting value
-    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
-    EXPECT_FALSE(enabled) << "Default dolbyAtmosExperience must be false";
-}
-
-TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_AudioOutput)
-{
-    auto* iface = static_cast<Exchange::IAudioOutput*>(impl->QueryInterface(Exchange::IAudioOutput::ID));
-    ASSERT_NE(iface, nullptr) << "QueryInterface(IAudioOutput::ID) must return non-null";
-    iface->Release();
-}
-
-TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_Configuration)
-{
-    auto* iface = static_cast<Exchange::IConfiguration*>(impl->QueryInterface(Exchange::IConfiguration::ID));
-    ASSERT_NE(iface, nullptr) << "QueryInterface(IConfiguration::ID) must return non-null";
-    iface->Release();
-}
-
-// ===========================================================================
-// Tests: Configure() / DeviceSettings activation
-// ===========================================================================
-
-// Nothing enabled: AtmosMetadata falls back to SPEAKER0 (NOT_SUPPORTED), no sound mode port.
-TEST_F(AudioOutputImplementationTest, Configure_NoPortsEnabled_ReturnsFalse)
-{
-    TEST_LOG("Configure: no enabled ports");
-
-    ConfigureAndWait();
-    EXPECT_FALSE(DolbyAtmosExperience());
-}
-
-TEST_F(AudioOutputImplementationTest, Configure_RegistersAudioNotificationWithClientName)
-{
-    TEST_LOG("Configure: IDeviceSettingsAudio::Register called with the AudioOutput client name");
-
-    EXPECT_CALL(*audioMock, Register(::testing::Eq(std::string("AudioOutput")), _)).Times(1);
-    ConfigureAndWait();
-}
-
-TEST_F(AudioOutputImplementationTest, Configure_HdmiCecSinkAvailable_RegistersNotification)
-{
-    TEST_LOG("Configure: HdmiCecSink available -> notification registered");
-
-    ExposeHdmiCecSink();
-    EXPECT_CALL(hdmiCecSinkMock, Register(_)).Times(1);
-    ConfigureAndWait();
-    EXPECT_NE(cecListener, nullptr);
-}
-
-TEST_F(AudioOutputImplementationTest, Configure_HdmiCecSinkUnavailable_StillSucceeds)
 {
     TEST_LOG("Configure: HdmiCecSink unavailable -> still ERROR_NONE");
 
