@@ -43,7 +43,7 @@ target_compile_options(${MODULE_NAME} PRIVATE -Wno-error)
 target_link_libraries(${MODULE_NAME} PRIVATE ${NAMESPACE}Plugins::${NAMESPACE}Plugins)
 
 # ---------------------------------------------------------------------------
-# TestMocklib: stub implementations for devicesettings, IARMBus, RFC, etc.
+# TestMocklib: stub implementations for IARMBus, RFC, etc.
 # Required in in-process (non-OOP) L2 test builds.
 # ---------------------------------------------------------------------------
 if(NOT L2_TEST_OOP_RPC)
@@ -54,6 +54,17 @@ if(NOT L2_TEST_OOP_RPC)
     else()
         message("Require ${TESTMOCKLIB_LIBRARIES} library")
     endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# libds-hal: DeviceSettings HAL mocks referenced by L2TestsMock.h
+# ---------------------------------------------------------------------------
+find_library(DSHAL_MOCK_LIBRARIES NAMES ds-hal)
+if(DSHAL_MOCK_LIBRARIES)
+    message("Found DS HAL mock library - ${DSHAL_MOCK_LIBRARIES}")
+    target_link_libraries(${MODULE_NAME} PRIVATE ${DSHAL_MOCK_LIBRARIES})
+else()
+    message("Require ds-hal library")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -77,16 +88,17 @@ target_include_directories(${MODULE_NAME}
         # This directory (for any local headers)
         ./
 
-        # Plugin headers — AudioOutputImplementation.h and its DS includes
+        # Plugin headers
         ../../plugin
 
-        # testframework: top-level mocks (devicesettings.h, Iarm.h, etc.)
+        # testframework: top-level mocks (Iarm.h, etc.)
         ../../../entservices-testframework/Tests/mocks
 
         # testframework: Thunder mocks (ServiceMock.h, COMLinkMock.h)
         ../../../entservices-testframework/Tests/mocks/thunder
 
-        # testframework: devicesettings sub-mocks (HostMock.h, AudioOutputPortMock.h, ...)
+        # testframework: DS HAL mocks (DsAudioHALMock.h, ...) pulled in by L2TestsMock.h;
+        # they need the rdk-halif-device_settings headers on the compiler include path
         ../../../entservices-testframework/Tests/mocks/devicesettings
 
         # testframework: MockPlugin helpers

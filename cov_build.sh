@@ -27,7 +27,6 @@ ls -la ${GITHUB_WORKSPACE}
 cd $GITHUB_WORKSPACE/entservices-testframework/Tests
 mkdir -p headers \
          headers/audiocapturemgr \
-         headers/rdk/ds \
          headers/rdk/iarmbus \
          headers/rdk/iarmmgrs-hal \
          headers/rdk/halif/deepsleep-manager \
@@ -39,13 +38,6 @@ mkdir -p headers \
 cd headers
 touch audiocapturemgr/audiocapturemgr_iarm.h
 touch ccec/drivers/CecIARMBusMgr.h
-touch rdk/ds/audioOutputPort.hpp rdk/ds/audioOutputPortConfig.hpp rdk/ds/audioOutputPortType.hpp
-touch rdk/ds/audioStereoMode.hpp rdk/ds/compositeIn.hpp rdk/ds/dsAudio.h
-touch rdk/ds/dsDisplay.h rdk/ds/dsError.h rdk/ds/dsMgr.h rdk/ds/dsTypes.h rdk/ds/dsUtl.h
-touch rdk/ds/exception.hpp rdk/ds/hdmiIn.hpp rdk/ds/host.hpp rdk/ds/list.hpp
-touch rdk/ds/manager.hpp rdk/ds/pixelResolution.hpp rdk/ds/sleepMode.hpp
-touch rdk/ds/videoDevice.hpp rdk/ds/videoOutputPort.hpp rdk/ds/videoOutputPortConfig.hpp
-touch rdk/ds/videoOutputPortType.hpp rdk/ds/videoResolution.hpp
 touch rdk/iarmbus/libIARM.h rdk/iarmbus/libIBus.h rdk/iarmbus/libIBusDaemon.h
 touch rdk/halif/deepsleep-manager/deepSleepMgr.h
 touch rdk/iarmmgrs-hal/mfrMgr.h rdk/iarmmgrs-hal/sysMgr.h
@@ -72,13 +64,11 @@ cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
 -DCOMCAST_CONFIG=OFF \
 -DRDK_SERVICES_COVERITY=ON \
 -DRDK_SERVICES_L1_TEST=ON \
--DDS_FOUND=ON \
 -DPLUGIN_AUDIOOUTPUT=ON \
 -DTESTFRAMEWORK_DIR="$GITHUB_WORKSPACE/entservices-testframework" \
 -DCMAKE_CXX_FLAGS="-DEXCEPTIONS_ENABLE=ON \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/audiocapturemgr \
--I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/rdk/ds \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/rdk/iarmbus \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/ccec/drivers \
@@ -89,8 +79,6 @@ cmake -G Ninja -S "$GITHUB_WORKSPACE" -B build/entservices-audiooutput \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/headers/Dobby/IpcService \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks \
 -I ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/thunder \
--I /usr/include/libdrm \
--include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/devicesettings.h \
 -include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/Iarm.h \
 -include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/Rfc.h \
 -include ${GITHUB_WORKSPACE}/entservices-testframework/Tests/mocks/RBus.h \
