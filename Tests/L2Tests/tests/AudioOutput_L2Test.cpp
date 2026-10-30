@@ -24,8 +24,10 @@
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <atomic>
 #include <interfaces/IAudioOutput.h>
 #include "devicesettings/DsAudioHALMock.h"
+#include "devicesettings/DsHdmiInHALMock.h"
 
 #define TEST_LOG(x, ...) fprintf(stderr, "\033[1;32m[%s:%d](%s)<PID:%d><TID:%d>" x "\n\033[0m", \
     __FILE__, __LINE__, __FUNCTION__, getpid(), gettid(), ##__VA_ARGS__); fflush(stderr);
@@ -76,10 +78,10 @@ private:
 // L2 test fixture
 //
 // AudioOutput obtains all audio data from the org.rdk.DeviceSettings plugin over
-// COM-RPC. The DeviceSettings plugin is not part of this L2 environment, so the
-// plugin runs with its default state (dolbyAtmosExperience == false) and these
-// tests cover plugin activation, the JSON-RPC / COM-RPC wiring and the
-// Atmos HAL callbacks are captured from DsAudioHalMock so tests can inject events.
+// COM-RPC. DeviceSettings is activated once per test process, because its HDMI-In
+// hot plug HAL registration is one-time. The HAL mocks are process-lifetime objects;
+// tests set the sink Atmos state via mSinkAtmosCapability and fire the captured
+// Atmos and HDMI-In callbacks to inject events.
 // ---------------------------------------------------------------------------
 class AudioOutputL2Test : public L2TestMocks {
 protected:
@@ -92,22 +94,50 @@ protected:
 
     uint32_t CreateAudioOutputInterfaceObjectUsingComRPCConnection();
 
-    std::unique_ptr<::testing::NiceMock<DsAudioHalMock>> mDsAudioHalMock;
-    dsAtmosCapsChangeCB_t mAtmosCapsChangeCB{nullptr};
-    void ConfigureDsAudioHalDefaults();
+    // Process-wide DeviceSettings HAL state. Allocated once and intentionally never freed,
+    // because DeviceSettings stays active for the whole test process.
+    static ::testing::NiceMock<DsAudioHalMock>* mDsAudioHalMock;
+    static ::testing::NiceMock<DsHdmiInHalMock>* mDsHdmiInHalMock;
+    static dsAtmosCapsChangeCB_t mAtmosCapsChangeCB;
+    static dsHdmiInConnectCB_t mHdmiInConnectCB;
+    static std::atomic<dsATMOSCapability_t> mSinkAtmosCapability;
+    static std::atomic<unsigned int> mSinkAtmosQueryCount;
+    static bool mDeviceSettingsActive;
+
+    static void ConfigureDeviceSettingsMocks();
+    static void FireHdmiInHotPlug(bool connected);
 };
+
+::testing::NiceMock<DsAudioHalMock>* AudioOutputL2Test::mDsAudioHalMock = nullptr;
+::testing::NiceMock<DsHdmiInHalMock>* AudioOutputL2Test::mDsHdmiInHalMock = nullptr;
+dsAtmosCapsChangeCB_t AudioOutputL2Test::mAtmosCapsChangeCB = nullptr;
+dsHdmiInConnectCB_t AudioOutputL2Test::mHdmiInConnectCB = nullptr;
+std::atomic<dsATMOSCapability_t> AudioOutputL2Test::mSinkAtmosCapability{dsAUDIO_ATMOS_NOTSUPPORTED};
+std::atomic<unsigned int> AudioOutputL2Test::mSinkAtmosQueryCount{0};
+bool AudioOutputL2Test::mDeviceSettingsActive = false;
 
 AudioOutputL2Test::AudioOutputL2Test()
     : L2TestMocks()
 {
     TEST_LOG("AudioOutputL2Test constructor");
 
-    // HAL defaults must be installed before DeviceSettings activates and registers its callbacks
-    mDsAudioHalMock = std::make_unique<::testing::NiceMock<DsAudioHalMock>>();
-    DsAudioApi::setImpl(mDsAudioHalMock.get());
-    ConfigureDsAudioHalDefaults();
-    uint32_t dsStatus = ActivateServiceWithRetry(_T("org.rdk.DeviceSettings"), 3, 500);
-    EXPECT_EQ(Core::ERROR_NONE, dsStatus) << "Failed to activate DeviceSettings plugin";
+    // Process-wide DeviceSettings HAL mocks: configured once, reused by every test
+    if (mDsAudioHalMock == nullptr) {
+        ConfigureDeviceSettingsMocks();
+    }
+    DsAudioApi::setImpl(mDsAudioHalMock);
+    DsHdmiInApi::setImpl(mDsHdmiInHalMock);
+
+    // DeviceSettings is activated once per process so the HDMI-In connect callback registers once
+    if (!mDeviceSettingsActive) {
+        uint32_t dsStatus = ActivateServiceWithRetry(_T("org.rdk.DeviceSettings"), 3, 500);
+        EXPECT_EQ(Core::ERROR_NONE, dsStatus) << "Failed to activate DeviceSettings plugin";
+        mDeviceSettingsActive = (dsStatus == Core::ERROR_NONE);
+    }
+
+    // Reset per-test sink state before AudioOutput reads it on activation
+    mSinkAtmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
+    mSinkAtmosQueryCount = 0;
 
     uint32_t status = ActivateService(AUDIOOUTPUT_CALLSIGN);
     EXPECT_EQ(Core::ERROR_NONE, status) << "Failed to activate AudioOutput plugin";
@@ -125,17 +155,26 @@ AudioOutputL2Test::~AudioOutputL2Test()
     usleep(CLEANUP_DELAY_MICROSECONDS);
     DeactivateService(AUDIOOUTPUT_CALLSIGN);
 
-    DeactivateService(_T("org.rdk.DeviceSettings"));
-    DsAudioApi::setImpl(nullptr);
-    mDsAudioHalMock.reset();
+    // DeviceSettings stays active for the process; the base fixture clears its HAL impls
 }
 
-void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
+void AudioOutputL2Test::ConfigureDeviceSettingsMocks()
 {
     using ::testing::_;
     using ::testing::Invoke;
+    using ::testing::Return;
 
-    ASSERT_NE(nullptr, mDsAudioHalMock.get());
+    mDsAudioHalMock = new ::testing::NiceMock<DsAudioHalMock>();
+    mDsHdmiInHalMock = new ::testing::NiceMock<DsHdmiInHalMock>();
+
+    // HDMI-In: capture the connect callback so tests can inject hot plug events
+    ON_CALL(*mDsHdmiInHalMock, dsHdmiInInit()).WillByDefault(Return(dsERR_NONE));
+    ON_CALL(*mDsHdmiInHalMock, dsHdmiInTerm()).WillByDefault(Return(dsERR_NONE));
+    ON_CALL(*mDsHdmiInHalMock, dsHdmiInRegisterConnectCB(_))
+        .WillByDefault(Invoke([](dsHdmiInConnectCB_t cbFun) {
+            mHdmiInConnectCB = cbFun;
+            return dsERR_NONE;
+        }));
 
     // Port handles are non-zero for index 0 only, so each port type resolves to a distinct handle
     ON_CALL(*mDsAudioHalMock, dsGetAudioPort(_, _, _))
@@ -179,18 +218,19 @@ void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
             return dsERR_NONE;
         }));
 
-    // Sink reports no Atmos until a test injects an event
+    // Sink Atmos capability comes from mSinkAtmosCapability; every read is counted
     ON_CALL(*mDsAudioHalMock, dsGetSinkDeviceAtmosCapability(_, _))
         .WillByDefault(Invoke([](intptr_t, dsATMOSCapability_t* capability) {
+            ++mSinkAtmosQueryCount;
             if (capability) {
-                *capability = dsAUDIO_ATMOS_NOTSUPPORTED;
+                *capability = mSinkAtmosCapability.load();
             }
             return dsERR_NONE;
         }));
 
     // Capture the Atmos callback so tests can fire it
     ON_CALL(*mDsAudioHalMock, dsAudioAtmosCapsChangeRegisterCB(_))
-        .WillByDefault(Invoke([this](dsAtmosCapsChangeCB_t cbFun) {
+        .WillByDefault(Invoke([](dsAtmosCapsChangeCB_t cbFun) {
             mAtmosCapsChangeCB = cbFun;
             return dsERR_NONE;
         }));
@@ -232,7 +272,7 @@ uint32_t AudioOutputL2Test::CreateAudioOutputInterfaceObjectUsingComRPCConnectio
 // JSON-RPC and COM-RPC return the default value (false) when DeviceSettings
 // has not provided any Atmos capability / sound mode.
 // ===========================================================================
-TEST_F(AudioOutputL2Test, JsonRpc_DolbyAtmosExperience_DefaultFalse_WhenDeviceSettingsInactive)
+TEST_F(AudioOutputL2Test, JsonRpc_DolbyAtmosExperience_DefaultFalse_WhenNoAtmosCapability)
 {
     JsonObject params, result;
     uint32_t status = InvokeServiceMethod(
@@ -350,6 +390,134 @@ TEST_F(AudioOutputL2Test, ComRpc_NoNotification_WhenAtmosNotSupportedReported)
     bool enabled = true;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
     EXPECT_FALSE(enabled) << "NOT_SUPPORTED Atmos must report false";
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+// ===========================================================================
+// HDMI-In hot plug: AudioOutput marks its Atmos cache for reload and re-reads
+// the sink capability on the next DolbyAtmosExperience() call.
+// ===========================================================================
+void AudioOutputL2Test::FireHdmiInHotPlug(bool connected)
+{
+    ASSERT_NE(mHdmiInConnectCB, nullptr) << "DeviceSettings did not register the HDMI-In connect callback";
+    mHdmiInConnectCB(static_cast<dsHdmiInPort_t>(0), connected);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+}
+
+TEST_F(AudioOutputL2Test, HdmiInHotPlug_Connected_ReloadsAtmosCapabilityOnNextRead)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    // Let the activation-time initialisation finish before changing the sink state
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    bool before = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(before));
+    EXPECT_FALSE(before) << "Sink reports no Atmos before the hot plug";
+
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    FireHdmiInHotPlug(true);
+
+    bool enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
+    EXPECT_TRUE(enabled) << "Connected HDMI-In must re-read the sink Atmos capability";
+    EXPECT_TRUE(sink->WaitForNotification(500)) << "Changed Atmos state must notify observers";
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, HdmiInHotPlug_Disconnected_ReloadsAtmosCapabilityOnNextRead)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    // Establish a cached Atmos=true state through a connect event
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    FireHdmiInHotPlug(true);
+    bool enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
+    ASSERT_TRUE(enabled) << "Precondition: connected sink must report Atmos";
+
+    // Sink unplugged: the disconnect event must drop the cached value on the next read
+    mSinkAtmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
+    FireHdmiInHotPlug(false);
+
+    enabled = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
+    EXPECT_FALSE(enabled) << "Disconnected HDMI-In must re-read the sink and clear Atmos";
+}
+
+TEST_F(AudioOutputL2Test, HdmiInHotPlug_NoEvent_KeepsCachedAtmosCapability)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    FireHdmiInHotPlug(true);
+    bool enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
+    ASSERT_TRUE(enabled) << "Precondition: connected sink must report Atmos";
+
+    // HAL state changes without a hot plug event: the cache must be served with no new query
+    mSinkAtmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
+    const unsigned int queriesBefore = mSinkAtmosQueryCount.load();
+
+    enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
+    EXPECT_TRUE(enabled) << "Without a hot plug event the cached Atmos value must be kept";
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "No HAL query expected without a hot plug event";
+}
+
+TEST_F(AudioOutputL2Test, HdmiInHotPlug_RepeatedEvents_QueryOnceOnRead)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    const unsigned int queriesBefore = mSinkAtmosQueryCount.load();
+
+    FireHdmiInHotPlug(true);
+    FireHdmiInHotPlug(false);
+    FireHdmiInHotPlug(true);
+
+    bool first = false;
+    bool second = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(first));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(second));
+    EXPECT_TRUE(first);
+    EXPECT_TRUE(second);
+    EXPECT_EQ(queriesBefore + 1, mSinkAtmosQueryCount.load()) << "Coalesced hot plug events must trigger a single HAL re-read";
+}
+
+TEST_F(AudioOutputL2Test, HdmiInHotPlug_UnchangedAtmos_DoesNotNotify)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    FireHdmiInHotPlug(true);
+    bool enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
+    ASSERT_TRUE(enabled) << "Precondition: connected sink must report Atmos";
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    // Same Atmos state after the event: re-read, but the value must not be re-announced
+    FireHdmiInHotPlug(true);
+    enabled = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
+    EXPECT_TRUE(enabled);
+    EXPECT_FALSE(sink->WaitForNotification(500)) << "Unchanged Atmos value must not notify";
 
     mAudioOutputPlugin->Unregister(&(*sink));
 }
