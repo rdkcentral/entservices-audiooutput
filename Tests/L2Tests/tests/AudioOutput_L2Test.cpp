@@ -23,7 +23,9 @@
 #include "L2TestsMock.h"
 #include <mutex>
 #include <condition_variable>
+#include <memory>
 #include <interfaces/IAudioOutput.h>
+#include "devicesettings/DsAudioHALMock.h"
 
 #define TEST_LOG(x, ...) fprintf(stderr, "\033[1;32m[%s:%d](%s)<PID:%d><TID:%d>" x "\n\033[0m", \
     __FILE__, __LINE__, __FUNCTION__, getpid(), gettid(), ##__VA_ARGS__); fflush(stderr);
@@ -90,10 +92,8 @@ protected:
 
     uint32_t CreateAudioOutputInterfaceObjectUsingComRPCConnection();
 
-#ifdef DEVICESETTINGS_PLUGIN_MOCKS
     dsAtmosCapsChangeCB_t mAtmosCapsChangeCB{nullptr};
     void ConfigureDsAudioHalDefaults();
-#endif
 };
 
 AudioOutputL2Test::AudioOutputL2Test()
@@ -101,12 +101,10 @@ AudioOutputL2Test::AudioOutputL2Test()
 {
     TEST_LOG("AudioOutputL2Test constructor");
 
-#ifdef DEVICESETTINGS_PLUGIN_MOCKS
     // HAL defaults must be installed before DeviceSettings activates and registers its callbacks
     ConfigureDsAudioHalDefaults();
     uint32_t dsStatus = ActivateServiceWithRetry(_T("org.rdk.DeviceSettings"), 3, 500);
     EXPECT_EQ(Core::ERROR_NONE, dsStatus) << "Failed to activate DeviceSettings plugin";
-#endif
 
     uint32_t status = ActivateService(AUDIOOUTPUT_CALLSIGN);
     EXPECT_EQ(Core::ERROR_NONE, status) << "Failed to activate AudioOutput plugin";
@@ -124,21 +122,18 @@ AudioOutputL2Test::~AudioOutputL2Test()
     usleep(CLEANUP_DELAY_MICROSECONDS);
     DeactivateService(AUDIOOUTPUT_CALLSIGN);
 
-#ifdef DEVICESETTINGS_PLUGIN_MOCKS
     DeactivateService(_T("org.rdk.DeviceSettings"));
-#endif
 }
 
-#ifdef DEVICESETTINGS_PLUGIN_MOCKS
 void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
 {
     using ::testing::_;
     using ::testing::Invoke;
 
-    ASSERT_NE(nullptr, p_dsAudioHalMock);
+    ASSERT_NE(nullptr, mDsAudioHalMock.get());
 
     // Port handles are non-zero for index 0 only, so each port type resolves to a distinct handle
-    ON_CALL(*p_dsAudioHalMock, dsGetAudioPort(_, _, _))
+    ON_CALL(*mDsAudioHalMock, dsGetAudioPort(_, _, _))
         .WillByDefault(Invoke([](dsAudioPortType_t type, int index, intptr_t* handle) {
             if (index != 0 || handle == nullptr) {
                 return dsERR_OPERATION_NOT_SUPPORTED;
@@ -147,7 +142,7 @@ void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
             return dsERR_NONE;
         }));
 
-    ON_CALL(*p_dsAudioHalMock, dsIsAudioPortEnabled(_, _))
+    ON_CALL(*mDsAudioHalMock, dsIsAudioPortEnabled(_, _))
         .WillByDefault(Invoke([](intptr_t, bool* enabled) {
             if (enabled) {
                 *enabled = true;
@@ -155,7 +150,7 @@ void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
             return dsERR_NONE;
         }));
 
-    ON_CALL(*p_dsAudioHalMock, dsAudioOutIsConnected(_, _))
+    ON_CALL(*mDsAudioHalMock, dsAudioOutIsConnected(_, _))
         .WillByDefault(Invoke([](intptr_t, bool* isConnected) {
             if (isConnected) {
                 *isConnected = true;
@@ -163,7 +158,7 @@ void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
             return dsERR_NONE;
         }));
 
-    ON_CALL(*p_dsAudioHalMock, dsGetStereoMode(_, _))
+    ON_CALL(*mDsAudioHalMock, dsGetStereoMode(_, _))
         .WillByDefault(Invoke([](intptr_t, dsAudioStereoMode_t* mode) {
             if (mode) {
                 *mode = dsAUDIO_STEREO_PASSTHRU;
@@ -171,7 +166,7 @@ void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
             return dsERR_NONE;
         }));
 
-    ON_CALL(*p_dsAudioHalMock, dsGetStereoAuto(_, _))
+    ON_CALL(*mDsAudioHalMock, dsGetStereoAuto(_, _))
         .WillByDefault(Invoke([](intptr_t, int* autoMode) {
             if (autoMode) {
                 *autoMode = 0;
@@ -180,7 +175,7 @@ void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
         }));
 
     // Sink reports no Atmos until a test injects an event
-    ON_CALL(*p_dsAudioHalMock, dsGetSinkDeviceAtmosCapability(_, _))
+    ON_CALL(*mDsAudioHalMock, dsGetSinkDeviceAtmosCapability(_, _))
         .WillByDefault(Invoke([](intptr_t, dsATMOSCapability_t* capability) {
             if (capability) {
                 *capability = dsAUDIO_ATMOS_NOTSUPPORTED;
@@ -189,13 +184,12 @@ void AudioOutputL2Test::ConfigureDsAudioHalDefaults()
         }));
 
     // Capture the Atmos callback so tests can fire it
-    ON_CALL(*p_dsAudioHalMock, dsAudioAtmosCapsChangeRegisterCB(_))
+    ON_CALL(*mDsAudioHalMock, dsAudioAtmosCapsChangeRegisterCB(_))
         .WillByDefault(Invoke([this](dsAtmosCapsChangeCB_t cbFun) {
             mAtmosCapsChangeCB = cbFun;
             return dsERR_NONE;
         }));
 }
-#endif
 
 uint32_t AudioOutputL2Test::CreateAudioOutputInterfaceObjectUsingComRPCConnection()
 {
@@ -311,7 +305,6 @@ TEST_F(AudioOutputL2Test, ComRpc_Unregister_NotFound_ReturnsOk)
 // ===========================================================================
 TEST_F(AudioOutputL2Test, ComRpc_NotifiesTrue_WhenAtmosMetadataCapabilityReported)
 {
-#ifdef DEVICESETTINGS_PLUGIN_MOCKS
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
     ASSERT_NE(mAtmosCapsChangeCB, nullptr) << "DeviceSettings did not register the Atmos callback";
@@ -331,9 +324,6 @@ TEST_F(AudioOutputL2Test, ComRpc_NotifiesTrue_WhenAtmosMetadataCapabilityReporte
     EXPECT_TRUE(enabled) << "Atmos METADATA with passthrough sound mode must report true";
 
     mAudioOutputPlugin->Unregister(&(*sink));
-#else
-    GTEST_SKIP() << "DEVICESETTINGS_PLUGIN_MOCKS not defined; DeviceSettings HAL mock unavailable";
-#endif
 }
 
 // ===========================================================================
@@ -341,7 +331,6 @@ TEST_F(AudioOutputL2Test, ComRpc_NotifiesTrue_WhenAtmosMetadataCapabilityReporte
 // ===========================================================================
 TEST_F(AudioOutputL2Test, ComRpc_NoNotification_WhenAtmosNotSupportedReported)
 {
-#ifdef DEVICESETTINGS_PLUGIN_MOCKS
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
     ASSERT_NE(mAtmosCapsChangeCB, nullptr) << "DeviceSettings did not register the Atmos callback";
@@ -358,7 +347,4 @@ TEST_F(AudioOutputL2Test, ComRpc_NoNotification_WhenAtmosNotSupportedReported)
     EXPECT_FALSE(enabled) << "NOT_SUPPORTED Atmos must report false";
 
     mAudioOutputPlugin->Unregister(&(*sink));
-#else
-    GTEST_SKIP() << "DEVICESETTINGS_PLUGIN_MOCKS not defined; DeviceSettings HAL mock unavailable";
-#endif
 }
