@@ -37,6 +37,9 @@ namespace Plugin {
     // -------------------------------------------------------------------------
 
     AudioOutputImplementation::AudioOutputImplementation()
+        : _dsAudioNotification(*this)
+        , _dsHdminNotification(*this)
+        , _hdmiCecSinkNotification(this)
     {
         LOGINFO("AudioOutputImplementation Constructor");
     }
@@ -45,7 +48,19 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation Destructor");
 
-        // Unregister the DS audio notification before the COM-RPC link is closed.
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Unregister(&_hdmiCecSinkNotification);
+            _hdmiCecSink->Release();
+            _hdmiCecSink = nullptr;
+        }
+
+        // Unregister the DS notifications before the COM-RPC link is closed.
+        auto* hdmiIn = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsHDMIIn>();
+        if (hdmiIn != nullptr) {
+            hdmiIn->Unregister(&_dsHdminNotification);
+            hdmiIn->Release();
+        }
+
         auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
         if (audio != nullptr) {
             const uint32_t unregResult = audio->Unregister(&_dsAudioNotification);
@@ -70,14 +85,29 @@ namespace Plugin {
 
         // Open the COM-RPC link to the DeviceSettings plugin. If DeviceSettings is
         // already active, OnDeviceSettingsActivated() fires synchronously here.
-		LOGINFO("Configure: Opening DeviceSettings COM-RPC link for AudioOutput plugin");
+        LOGINFO("Configure: Opening DeviceSettings COM-RPC link for AudioOutput plugin");
         const uint32_t result = DSHelper::Open(service, "AudioOutput");
         if (result != Core::ERROR_NONE) {
             LOGERR("Configure: DSHelper::Open() failed with result=%u — audio events will NOT work", result);
         } else {
             LOGINFO("Configure: DSHelper::Open() succeeded");
         }
+
+        _hdmiCecSink = service->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Register(&_hdmiCecSinkNotification);
+            LOGINFO("Configure: registered for HdmiCecSink ReportAudioDevicePowerStatus notification");
+        } else {
+            LOGWARN("Configure: HdmiCecSink not available, ReportAudioDevicePowerStatus will not be received");
+        }
+
         return Core::ERROR_NONE;
+    }
+
+    void AudioOutputImplementation::OnHdmiInEventHotPlug(int port, bool isConnected)
+    {
+        LOGINFO("Received OnHdmiInEventHotPlug callback, port: %d, isConnected: %s", port, isConnected ? "true" : "false");
+        _reloadMetadata = true;
     }
 
     // -------------------------------------------------------------------------
@@ -103,17 +133,44 @@ namespace Plugin {
             LOGERR("OnDeviceSettingsActivated: IDeviceSettingsAudio unavailable for Register — NO EVENTS will be received");
         }
 
+        auto* hdmiIn = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsHDMIIn>();
+        if (hdmiIn != nullptr) {
+            const uint32_t hdmiInResult = hdmiIn->Register("AudioOutput", &_dsHdminNotification);
+            if (hdmiInResult != Core::ERROR_NONE) {
+                LOGERR("OnDeviceSettingsActivated: hdmiIn->Register() FAILED with error %u", hdmiInResult);
+            }
+            hdmiIn->Release();
+        } else {
+            LOGWARN("OnDeviceSettingsActivated: IDeviceSettingsHDMIIn not available, HDMI-In hot plug events will not be received");
+        }
+
+        dispatchEvent(EV_DS_ACTIVATED_INIT, ParamsType{ 0, 0 });
+    }
+
+    void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
+    {
+        // The first report after boot forces a re-query of the device capability instead of using the
+        // cached value; later reports are ignored because this event arrives frequently.
+        if (!_externalArcEnabled) {
+            LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
+            _reloadMetadata = true;
+            _externalArcEnabled = true;
+        }
+    }
+
+    void AudioOutputImplementation::InitAtmosMetadata()
+    {
         // Prime the cache now that DeviceSettings is guaranteed active.
         bool cap = false;
-        _atmosMetadataInitFailed = (AtmosMetadata(cap) != Core::ERROR_NONE);
-		if (_atmosMetadataInitFailed) {
-            LOGWARN("OnDeviceSettingsActivated: AtmosMetadata() query failed at init");
+        _reloadMetadata = (AtmosMetadata(cap) != Core::ERROR_NONE);
+        if (_reloadMetadata) {
+            LOGWARN("InitAtmosMetadata: AtmosMetadata() query failed at init");
         }
 
         Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
         _soundModeInitFailed = (SoundMode(mode) != Core::ERROR_NONE);
-		if (_soundModeInitFailed) {
-            LOGWARN("OnDeviceSettingsActivated: SoundMode() query failed at init");
+        if (_soundModeInitFailed) {
+            LOGWARN("InitAtmosMetadata: SoundMode() query failed at init");
         }
 
         _adminLock.Lock();
@@ -122,11 +179,29 @@ namespace Plugin {
         _adminLock.Unlock();
 
         UpdateCache();
-        LOGINFO("AudioOutputImplementation::OnDeviceSettingsActivated COMPLETE: "
+        LOGINFO("AudioOutputImplementation::InitAtmosMetadata : "
                 "dolbyAtmosExperience=%s, soundMode=%d (atmosFailed=%s, soundModeFailed=%s)",
                 _dolbyAtmosExperience ? "true" : "false", mode,
-                _atmosMetadataInitFailed ? "yes" : "no",
+                _reloadMetadata ? "yes" : "no",
                 _soundModeInitFailed ? "yes" : "no");
+    }
+
+    void AudioOutputImplementation::dispatchEvent(Event ev, const ParamsType& params)
+    {
+        Core::IWorkerPool::Instance().Submit(DispatchJob::Create(this, ev, params));
+    }
+
+    void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
+    {
+        if (ev == EV_AUDIOMODE_CHANGE) {
+            onAudioModeChanged(static_cast<Exchange::IDeviceSettingsAudio::AudioPortType>(params.first),
+                               static_cast<Exchange::IDeviceSettingsAudio::StereoMode>(params.second));
+        } else if (ev == EV_ATMOS_CAPABILITY_CHANGE) {
+            onAtmosCapabilitiesChanged(static_cast<Exchange::IDeviceSettingsAudio::DolbyAtmosCapability>(params.first),
+                                       params.second != 0);
+        } else if (ev == EV_DS_ACTIVATED_INIT) {
+            InitAtmosMetadata();
+        }
     }
 
     void AudioOutputImplementation::OnDeviceSettingsDeactivated()
@@ -140,12 +215,14 @@ namespace Plugin {
         _adminLock.Lock();
         bool isAtmosExpChanged = false;
 
+        LOGINFO("AudioOutputImplementation::UpdateCache: atmosMetaData=%s, soundMode=%d",
+                _atmosMetaData ? "true" : "false", static_cast<int>(_soundMode));
         bool newValue = EvaluateCurrentAtmosExperience();
         if (newValue != _dolbyAtmosExperience) {
             isAtmosExpChanged = true;
             _dolbyAtmosExperience = newValue;
         } else {
-            
+
             LOGINFO("AudioOutputImplementation: dolbyAtmosExperience unchanged (%s)",
                     _dolbyAtmosExperience ? "true" : "false");
         }
@@ -164,7 +241,7 @@ namespace Plugin {
 
     Core::hresult AudioOutputImplementation::DolbyAtmosExperience(bool& enabled) const
     {
-        if (_atmosMetadataInitFailed || _soundModeInitFailed) {
+        if (_reloadMetadata || _soundModeInitFailed) {
             LOGINFO("DolbyAtmosExperience: prior init failure detected, retrying HAL queries");
 
             bool cap = false;
@@ -179,7 +256,7 @@ namespace Plugin {
                 return Core::ERROR_GENERAL;
             }
 
-            _atmosMetadataInitFailed = false;
+            _reloadMetadata = false;
             _soundModeInitFailed = false;
 
             _adminLock.Lock();
@@ -251,15 +328,33 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation::onAudioModeChanged: portType=%d, audioMode=%d",
                 static_cast<int>(audioPortType), static_cast<int>(audioMode));
-
-        Exchange::IAudioOutput::AudioModes mode = DsAudioModeToSoundMode(audioMode);
-        if (mode != _soundMode) {
+        bool isAudioModeChanged = false;
+        auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
+        std::vector<AudioPortEntry> entries;
+        if (audio != nullptr && DSHelper::getAudioPortEntries(entries)) {
+            for (const AudioPortEntry& e : entries) {
+                int32_t portHandle = INVALID_DS_HANDLE;
+                if (DSHelper::isAudioOutputPortConnected(audio, e.name, portHandle)) {
+                    LOGINFO("Audio Port : [%s] is connected", e.name.c_str());
+                    if (e.type == audioPortType) {
+                        isAudioModeChanged = true;
+                        break;
+                    } else {
+                        // Ignore invalid event when Audiomode set for hdmi_arc0 while no external devices connected(speaker0)
+                        TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), e.name.c_str()));
+                    }
+                }
+            }
+        }
+        if (audio != nullptr) {
+            audio->Release();
+        }
+        if (isAudioModeChanged) {
+            Exchange::IAudioOutput::AudioModes mode = DsAudioModeToSoundMode(audioMode);
             _adminLock.Lock();
             _soundMode = mode;
             _adminLock.Unlock();
             UpdateCache();
-        } else {
-            LOGERR("onAudioModeChanged: SoundMode query failed");
         }
     }
 
@@ -317,12 +412,12 @@ namespace Plugin {
         if (!_atmosMetaData) {
             return false;
         }
-				
+
         switch (_soundMode) {
         case Exchange::IAudioOutput::PASSTHRU:
         case Exchange::IAudioOutput::DOLBYDIGITALPLUS:
-	case Exchange::IAudioOutput::SOUNDMODE_AUTO:
-	case  Exchange::IAudioOutput::SURROUND:
+        case Exchange::IAudioOutput::SOUNDMODE_AUTO:
+        case Exchange::IAudioOutput::SURROUND:
             return true;
         default:
             return false;
@@ -348,11 +443,12 @@ namespace Plugin {
         // Use cached handles populated by DSHelper::LoadAllConfigs()
         int32_t arcHandle  = DSHelper::getCachedAudioPortHandle("HDMI_ARC0");
         int32_t hdmiHandle = DSHelper::getCachedAudioPortHandle("HDMI0");
+        LOGINFO("AtmosMetadata: arcHandle=%d, hdmiHandle=%d", arcHandle, hdmiHandle);
 
         if (TV == searchRdkProfile()) {
             // TV platform: use persisted user-intent enable state — HAL state is unreliable on some platforms
             bool arcEnabled = false;
-			Core::SystemInfo::SetEnvironment(_T("THUNDER_ACCESS"), _T("127.0.0.1:9998"));
+            Core::SystemInfo::SetEnvironment(_T("THUNDER_ACCESS"), _T("127.0.0.1:9998"));
             WPEFramework::JSONRPC::LinkType<Core::JSON::IElement> dsClient(
                 _T("org.rdk.DisplaySettings.1"), _T("org.rdk.DisplaySettings.1"), false, _T(""));
             JsonObject params;
@@ -370,59 +466,29 @@ namespace Plugin {
                 LOGINFO("AtmosMetadata: ARC enabled, querying HDMI_ARC0 for ATMOS capability");
                 audio->GetAudioSinkDeviceAtmosCapability(arcHandle, capability);
             } else {
-                // ARC not enabled — query HDMI0 (TV panel itself)
-                LOGINFO("AtmosMetadata: ARC not enabled, querying HDMI0 for ATMOS capability");
-                int32_t selectedHandle = (hdmiHandle != INVALID_DS_HANDLE) ? hdmiHandle
-                                       : DSHelper::getCachedAudioPortHandle("SPEAKER0");
-                if (selectedHandle != INVALID_DS_HANDLE) {
-                    audio->GetAudioSinkDeviceAtmosCapability(selectedHandle, capability);
-                } else {
-                    LOGWARN("AtmosMetadata: no HDMI_ARC (enabled), HDMI, or SPEAKER port found");
-                }
+                // ARC not enabled — query the TV panel sink itself, matching legacy's
+                // device::Host::getSinkDeviceAtmosCapability() which passes a NULL (no port) handle.
+                LOGINFO("AtmosMetadata: ARC not enabled, querying TV panel ATMOS capability");
+                audio->GetAudioSinkDeviceAtmosCapability(0, capability);
             }
             supported = (capability == Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_METADATA);
             LOGINFO("AtmosMetadata: capability=%d, supported=%s",
                     static_cast<int>(capability), supported ? "true" : "false");
         } else {
-			LOGINFO("AtmosMetadata: STB platform, audioPort = %s", audioPort.c_str());
-            // STB platform: keep port-priority logic (HDMI_ARC > HDMI > SPEAKER)
-            int32_t selectedHandle = INVALID_DS_HANDLE;
-            bool    arcConnected   = false;
-
-            if (arcHandle != INVALID_DS_HANDLE) {
-                bool arcEnabled = false;
-                audio->IsAudioPortEnabled(arcHandle, arcEnabled);
-                if (arcEnabled) {
-                    selectedHandle = arcHandle;
-                    arcConnected   = true;
-                }
-            }
-			if (!arcConnected && hdmiHandle != INVALID_DS_HANDLE) {
-                bool hdmiEnabled = false;
-                audio->IsAudioPortEnabled(hdmiHandle, hdmiEnabled);
-                if (hdmiEnabled) {
-                    selectedHandle = hdmiHandle;
-                }
-            }
-
-            if (selectedHandle != INVALID_DS_HANDLE) {
-                Exchange::IDeviceSettingsAudio::DolbyAtmosCapability capability = Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
-                audio->GetAudioSinkDeviceAtmosCapability(selectedHandle, capability);
-                supported = (capability == Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_METADATA);
-                LOGINFO("AtmosMetadata: capability=%d, supported=%s",
-                        static_cast<int>(capability), supported ? "true" : "false");
+            // STB platform: audio goes through HDMI0 only, matching legacy's
+            // audioPort="HDMI0" + aPort.isConnected() / Host fallback (no ARC, no SPEAKER on STB).
+            LOGINFO("AtmosMetadata: STB platform");
+            Exchange::IDeviceSettingsAudio::DolbyAtmosCapability capability = Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
+            auto* self = const_cast<AudioOutputImplementation*>(this);
+            if (self->isAudioOutputPortConnected(audio, "HDMI0", hdmiHandle)) {
+                audio->GetAudioSinkDeviceAtmosCapability(hdmiHandle, capability);
             } else {
-                int32_t spkHandle = DSHelper::getCachedAudioPortHandle("SPEAKER0");
-                if (spkHandle != INVALID_DS_HANDLE) {
-                    Exchange::IDeviceSettingsAudio::DolbyAtmosCapability capability = Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED;
-                    audio->GetAudioSinkDeviceAtmosCapability(spkHandle, capability);
-                    supported = (capability == Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_METADATA);
-                    LOGINFO("AtmosMetadata (SPEAKER fallback): capability=%d, supported=%s",
-                            static_cast<int>(capability), supported ? "true" : "false");
-				} else {
-                    LOGWARN("AtmosMetadata: no connected HDMI_ARC, HDMI, or SPEAKER port found");
-                }
+                LOGWARN("AtmosMetadata: HDMI0 not connected, using host getSinkDeviceAtmosCapability");
+                audio->GetAudioSinkDeviceAtmosCapability(0, capability);
             }
+            supported = (capability == Exchange::IDeviceSettingsAudio::AUDIO_DOLBY_ATMOS_METADATA);
+            LOGINFO("AtmosMetadata: capability=%d, supported=%s",
+                    static_cast<int>(capability), supported ? "true" : "false");
         }
 
         audio->Release();
