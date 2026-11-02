@@ -992,37 +992,6 @@ bool AudioOutputL2Test::WaitForDolbyAtmosExperience(bool expected, int timeoutMs
         usleep(50000);
     }
 }
-#if 0
-// ===========================================================================
-// onAudioModeChanged: a DeviceSettings stereo mode change on a connected HDMI port
-// updates the sound mode, which drives dolbyAtmosExperience.
-// The change reaches AudioOutput through DeviceSettings SetStereoMode ->
-// notifyAudioModeChanged -> IDeviceSettingsAudio::INotification.
-// ===========================================================================
-TEST_F(AudioOutputL2Test, AudioModeChanged_ConnectedHdmi_UpdatesSoundMode)
-{
-    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
-    ASSERT_NE(mAudioOutputPlugin, nullptr);
-    ASSERT_EQ(Core::ERROR_NONE, AcquireDeviceSettingsAudio());
-    usleep(DS_SETTLE_DELAY_MICROSECONDS);
-
-    // Default HAL stereo mode is passthrough, so Atmos METADATA reports true
-    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
-    FireHdmiInHotPlug(true);
-    ASSERT_TRUE(WaitForDolbyAtmosExperience(true)) << "Precondition: passthrough with Atmos must report true";
-
-    const unsigned int before = mSetStereoModeCount.load();
-    EXPECT_EQ(Core::ERROR_NONE, SetDsStereoMode(Exchange::IDeviceSettingsAudio::AUDIO_PORT_TYPE_HDMI,
-                                                Exchange::IDeviceSettingsAudio::AUDIO_STEREO_STEREO));
-    EXPECT_EQ(before + 1, mSetStereoModeCount.load()) << "DeviceSettings must reach the HAL stereo mode call";
-    EXPECT_TRUE(WaitForDolbyAtmosExperience(false)) << "Connected HDMI mode change must update the sound mode";
-
-    // Restore passthrough so the next test starts from the default
-    EXPECT_EQ(Core::ERROR_NONE, SetDsStereoMode(Exchange::IDeviceSettingsAudio::AUDIO_PORT_TYPE_HDMI,
-                                                Exchange::IDeviceSettingsAudio::AUDIO_STEREO_PASSTHROUGH));
-    EXPECT_TRUE(WaitForDolbyAtmosExperience(true));
-}
-#endif 
 
 // HDMI port disconnected while other (non-HDMI) ports stay connected: the event matches no
 // connected port of its type, so the cached sound mode must not change.
@@ -1081,28 +1050,6 @@ TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_ArcEnabled_QueriesArcPort)
     EXPECT_EQ(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI_ARC), mLastAtmosQueryHandle.load())
         << "STB with ARC enabled must query HDMI_ARC0";
 }
-#if 0
-TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_ArcDisabled_FallsBackToHdmi)
-{
-    ScopedRdkProfile profile("STB");
-    ASSERT_TRUE(profile.IsActive()) << "/etc/device.properties must be writable to set RDK_PROFILE=STB";
-
-    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
-    ASSERT_NE(mAudioOutputPlugin, nullptr);
-    usleep(DS_SETTLE_DELAY_MICROSECONDS);
-
-    SetAudioPortFlag(mDisabledAudioPorts, HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI_ARC), true);
-    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
-    FireHdmiInHotPlug(true);
-    mLastAtmosQueryHandle = 0;
-
-    bool enabled = false;
-    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled);
-    EXPECT_EQ(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), mLastAtmosQueryHandle.load())
-        << "STB with ARC disabled must fall back to HDMI0";
-}
-#endif
 
 TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_ArcAndHdmiDisabled_FallsBackToSpeaker)
 {
