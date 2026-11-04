@@ -64,7 +64,7 @@ namespace Plugin {
         } else {
             LOGINFO("Configure: DSHelper::Open() succeeded");
         }
-        
+
         return Core::ERROR_NONE;
     }
 
@@ -74,7 +74,7 @@ namespace Plugin {
 
     void AudioOutputImplementation::OnDeviceSettingsActivated()
     {
-        dispatchEvent(EV_DS_ACTIVATED_INIT, ParamsType{ 0, 0 });
+        _dsActivated = true;
     }
 
     void AudioOutputImplementation::dispatchEvent(Event ev, const ParamsType& params)
@@ -85,14 +85,14 @@ namespace Plugin {
     void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
     {
         if (ev == EV_ATMOS_EXP_CHANGED) {
-            SendNotify(static_cast<bool>(params.first));
-        } 
+            SendNotify(params.first != 0);
+        }
     }
 
     void AudioOutputImplementation::OnDeviceSettingsDeactivated()
     {
         LOGINFO("AudioOutputImplementation: OnDeviceSettingsDeactivated");
-        // The COM-RPC link is down; cached values are retained until DS reactivates.
+        _dsActivated = false;
     }
 
     // -------------------------------------------------------------------------
@@ -101,6 +101,12 @@ namespace Plugin {
     Core::hresult AudioOutputImplementation::DolbyAtmosExperience(bool& enabled) const
     {
             bool cap = false;
+
+            if (!_dsActivated) {
+                LOGERR("DolbyAtmosExperience: failed dsmgr not activated yet");
+                return Core::ERROR_GENERAL;
+            }
+
             bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
 
             Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
@@ -111,17 +117,15 @@ namespace Plugin {
                        atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
                 return Core::ERROR_GENERAL;
             }
-            bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
-            if (newValue != _dolbyAtmosExperience) {
-                isAtmosExpChanged = true;
-                _dolbyAtmosExperience = newValue;
-            }
+            const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
             enabled = newValue;
-            if (isAtmosExpChanged) {
+            if (_dolbyAtmosExperience.exchange(newValue) != newValue) {
                 LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
-                dispatchEvent(EV_ATMOS_EXP_CHANGED, ParamsType{ newValue, 0 });
-            }     
+                const_cast<AudioOutputImplementation*>(this)->dispatchEvent(
+                    EV_ATMOS_EXP_CHANGED, ParamsType{ static_cast<int32_t>(newValue), 0 });
+            }
+            return Core::ERROR_NONE;
     }
 
     // -------------------------------------------------------------------------
