@@ -61,39 +61,49 @@ namespace Plugin {
         uint32_t Configure(PluginHost::IShell* service) override;
 
     private:
-        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
-        private:
-            DsAudioPortNotification(const DsAudioPortNotification&) = delete;
-            DsAudioPortNotification& operator=(const DsAudioPortNotification&) = delete;
+        enum Event {
+            EV_ATMOS_EXP_CHANGED = 0
+        };
+
+        // Event payload: first = new dolbyAtmosExperience value; second unused.
+        struct ParamsType {
+            int32_t first;
+            int32_t second;
+        };
+
+        // Worker-pool job: carries (impl*, Event, ParamsType); calls impl->Dispatch() on a worker thread.
+        class DispatchJob : public Core::IDispatch {
+        protected:
+            DispatchJob(AudioOutputImplementation* au, Event ev, const ParamsType& params)
+                : _parent(au), _ev(ev), _params(params)
+            {
+                if (_parent != nullptr) {
+                    _parent->AddRef();
+                }
+            }
 
         public:
-            explicit DsAudioPortNotification(AudioOutputImplementation& parent)
-                : _parent(parent)
+            DispatchJob() = delete;
+            DispatchJob(const DispatchJob&) = delete;
+            DispatchJob& operator=(const DispatchJob&) = delete;
+            ~DispatchJob() override
             {
-            }
-            ~DsAudioPortNotification() override = default;
-
-        public:
-            void OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status) override
-            {
-                _parent.onAtmosCapabilitiesChanged(atmosCapability, status);
+                if (_parent != nullptr) {
+                    _parent->Release();
+                }
             }
 
-            // Stubs for other IAudioOutputPortEvents methods
-            void OnAudioOutHotPlug(dsAudioPortType_t, uint32_t, bool) override {}
-            void OnAudioFormatUpdate(dsAudioFormat_t) override {}
-            void OnAudioPortStateChanged(dsAudioPortState_t) override {}
-            void OnAssociatedAudioMixingChanged(bool) override {}
-            void OnAudioFaderControlChanged(int) override {}
-            void OnAudioPrimaryLanguageChanged(const std::string&) override {}
-            void OnAudioSecondaryLanguageChanged(const std::string&) override {}
-            void OnAudioModeEvent(dsAudioPortType_t type, dsAudioStereoMode_t smode) override
+            static Core::ProxyType<Core::IDispatch> Create(AudioOutputImplementation* au, Event ev, const ParamsType& params)
             {
-                _parent.onAudioModeChanged(type, smode);
+                return Core::ProxyType<Core::IDispatch>(Core::ProxyType<DispatchJob>::Create(au, ev, params));
             }
+
+            void Dispatch() override { _parent->Dispatch(_ev, _params); }
 
         private:
-            AudioOutputImplementation& _parent;
+            AudioOutputImplementation* _parent;
+            Event _ev;
+            const ParamsType _params;
         };
 
     private:
@@ -101,33 +111,20 @@ namespace Plugin {
         uint32_t AtmosMetadata(bool& supported) const;
         uint32_t SoundMode(Exchange::IAudioOutput::AudioModes& mode) const;
 
-        bool EvaluateCurrentAtmosExperience() const;
+        bool EvaluateCurrentAtmosExperience(Exchange::IAudioOutput::AudioModes mode, bool cap) const;
 
         void SendNotify(bool dolbyAtmosExperience);
-        void UpdateCache();
-        void registerDsEventHandlers();
-        void unregisterDsEventHandlers();
-        void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
-        void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
+        void Dispatch(Event ev, const ParamsType& params);
+        void dispatchEvent(Event ev, const ParamsType& params);
 
     private:
         mutable Core::CriticalSection _adminLock;
 
-        // Cached values
-        mutable bool _atmosMetaData{false};
-        mutable Exchange::IAudioOutput::AudioModes _soundMode{Exchange::IAudioOutput::UNKNOWN};
-        bool _dolbyAtmosExperience{false};
-
-        // Init failure flags — atomic so they need no lock
-        mutable std::atomic<bool> _atmosMetadataInitFailed{false};
-        mutable std::atomic<bool> _soundModeInitFailed{false};
+        // Last value reported; used only to detect changes for notification
+        mutable std::atomic<bool> _dolbyAtmosExperience{false};
 
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
-
-        // DS HAL event listener
-        DsAudioPortNotification _dsAudioPortNotification{*this};
-        bool _registeredDsEventHandlers{false};
     };
 
 } // namespace Plugin

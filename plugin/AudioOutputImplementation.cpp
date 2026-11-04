@@ -62,41 +62,58 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation Destructor");
 
         try {
-            unregisterDsEventHandlers();
             device::Manager::DeInitialize();
             LOGINFO("device::Manager::DeInitialize success");
         } catch (const device::Exception& err) {
             LOGWARN("device::Manager::DeInitialize failed: {%s}", err.what());
         }
     }
-   
+
+    uint32_t AudioOutputImplementation::Configure(PluginHost::IShell* service)
+    {
+        ASSERT(service != nullptr);
+        return Core::ERROR_NONE;
+    }
+
+    void AudioOutputImplementation::dispatchEvent(Event ev, const ParamsType& params)
+    {
+        Core::IWorkerPool::Instance().Submit(DispatchJob::Create(this, ev, params));
+    }
+
+    void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
+    {
+        if (ev == EV_ATMOS_EXP_CHANGED) {
+            SendNotify(params.first != 0);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // IAudioOutput::DolbyAtmosExperience
     // -------------------------------------------------------------------------
 
     Core::hresult AudioOutputImplementation::DolbyAtmosExperience(bool& enabled) const
     {
-          bool cap = false;
-          bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
+        bool cap = false;
+        const bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
 
-          Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
-          bool soundErr = (SoundMode(mode) != Core::ERROR_NONE);
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+        const bool soundErr = (SoundMode(mode) != Core::ERROR_NONE);
 
-          if (atmosErr || soundErr) {
-                LOGERR("DolbyAtmosExperience: failed (atmosMetadata=%s, soundMode=%s)",
-                       atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
-                return Core::ERROR_GENERAL;
-            }
-            const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
-            enabled = newValue;
-            if (_dolbyAtmosExperience.exchange(newValue) != newValue) {
-                LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
+        if (atmosErr || soundErr) {
+            LOGERR("DolbyAtmosExperience: failed (atmosMetadata=%s, soundMode=%s)",
+                   atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
+            return Core::ERROR_GENERAL;
+        }
+
+        const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
+        enabled = newValue;
+        if (_dolbyAtmosExperience.exchange(newValue) != newValue) {
+            LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
-                const_cast<AudioOutputImplementation*>(this)->dispatchEvent(
-                    EV_ATMOS_EXP_CHANGED, ParamsType{ static_cast<int32_t>(newValue), 0 });
-            }
-            return Core::ERROR_NONE;
-
+            const_cast<AudioOutputImplementation*>(this)->dispatchEvent(
+                EV_ATMOS_EXP_CHANGED, ParamsType{ static_cast<int32_t>(newValue), 0 });
+        }
+        return Core::ERROR_NONE;
     }
 
     // -------------------------------------------------------------------------
@@ -170,17 +187,17 @@ namespace Plugin {
     // Step 2: soundMode must be PASSTHRU, DOLBYDIGITALPLUS, or SOUNDMODE_AUTO
     // -------------------------------------------------------------------------
 
-    bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
+    bool AudioOutputImplementation::EvaluateCurrentAtmosExperience(Exchange::IAudioOutput::AudioModes mode, bool cap) const
     {
-        if (!_atmosMetaData) {
+        if (!cap) {
             return false;
         }
-				
-        switch (_soundMode) {
+
+        switch (mode) {
         case Exchange::IAudioOutput::PASSTHRU:
         case Exchange::IAudioOutput::DOLBYDIGITALPLUS:
-	case Exchange::IAudioOutput::SOUNDMODE_AUTO:
-	case  Exchange::IAudioOutput::SURROUND:
+        case Exchange::IAudioOutput::SOUNDMODE_AUTO:
+        case Exchange::IAudioOutput::SURROUND:
             return true;
         default:
             return false;
