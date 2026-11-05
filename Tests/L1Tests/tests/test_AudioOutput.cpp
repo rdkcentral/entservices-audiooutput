@@ -387,7 +387,20 @@ TEST_F(AudioOutputImplementationTest, Notification_FiredOnTrueToFalseTransition)
 {
     SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
     SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_TRUE(Query());   // no observer registered yet
+
+    // The initial false->true change is dispatched asynchronously. Drain it with a
+    // priming observer so it cannot reach the observer under test after Register().
+    {
+        NotificationSignal primed;
+        auto primer = Core::ProxyType<MockAudioOutputNotification>::Create();
+        impl->Register(&(*primer));
+        EXPECT_CALL(*primer, OnDolbyAtmosExperienceChanged(true))
+            .Times(1)
+            .WillOnce(Invoke([&](bool) { primed.Notify(); }));
+        EXPECT_TRUE(Query());
+        EXPECT_TRUE(primed.WaitFor(1));
+        impl->Unregister(&(*primer));
+    }
 
     NotificationSignal signal;
     auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
