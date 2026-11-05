@@ -120,8 +120,8 @@ namespace Plugin {
     private:
         mutable Core::CriticalSection _adminLock;
 
-        // Last value reported; used only to detect changes for notification
-        mutable std::atomic<bool> _dolbyAtmosExperience{false};
+        // Last value reported; used only to detect changes for notification. Guarded by _adminLock.
+        mutable bool _dolbyAtmosExperience{false};
 
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;

@@ -107,7 +107,13 @@ namespace Plugin {
 
         const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
         enabled = newValue;
-        if (_dolbyAtmosExperience.exchange(newValue) != newValue) {
+
+        _adminLock.Lock();
+        const bool changed = (_dolbyAtmosExperience != newValue);
+        _dolbyAtmosExperience = newValue;
+        _adminLock.Unlock();
+
+        if (changed) {
             LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
             const_cast<AudioOutputImplementation*>(this)->dispatchEvent(
