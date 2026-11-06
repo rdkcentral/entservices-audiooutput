@@ -27,6 +27,7 @@
 #include <list>
 #include <mutex>
 #include <string>
+#include <future>
 #include <vector>
 
 #include "AudioOutputImplementation.h"
@@ -108,6 +109,36 @@ private:
     unsigned int _activations{0};
 };
 
+// Completion job for the test worker pool. The pool runs a single thread and dispatches
+// FIFO, so when this job has run every job submitted before it has finished.
+class SyncDispatchJob : public Core::IDispatch {
+public:
+    explicit SyncDispatchJob(std::promise<void>& done)
+        : _done(done)
+    {
+    }
+    ~SyncDispatchJob() = default;
+
+    void Dispatch() override
+    {
+        _done.set_value();
+    }
+
+private:
+    std::promise<void>& _done;
+};
+
+// Blocks until the plugin's pending worker-pool jobs (cache priming, event dispatch) have run.
+void DrainWorkerPool()
+{
+    std::promise<void> done;
+    std::future<void> finished = done.get_future();
+    Core::IWorkerPool::Instance().Submit(
+        Core::ProxyType<Core::IDispatch>(Core::ProxyType<SyncDispatchJob>::Create(done)));
+    ASSERT_EQ(std::future_status::ready, finished.wait_for(std::chrono::seconds(5)))
+        << "worker pool did not drain";
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -138,9 +169,12 @@ protected:
     PluginHost::IPlugin::INotification*    dsPluginSink = nullptr; // DSHelper plugin monitor
     Audio::INotification*                  dsListener   = nullptr; // IDeviceSettingsAudio events
     Exchange::IHdmiCecSink::INotification* cecListener  = nullptr; // HdmiCecSink events
+    HdmiInIface::INotification*            hdmiInListener = nullptr; // IDeviceSettingsHDMIIn events
 
     void SetUp() override
     {
+        // WorkerPoolImplementation creates (threads - 1) workers, so 2 gives exactly one worker thread.
+        // Jobs then run in submission order, which DrainWorkerPool() relies on.
         workerPool = Core::ProxyType<WorkerPoolImplementation>::Create(2, Core::Thread::DefaultStackSize(), 16);
         Core::IWorkerPool::Assign(&(*workerPool));
         workerPool->Run();
@@ -166,6 +200,10 @@ protected:
 
         ON_CALL(hdmiCecSinkMock, Register(_))
             .WillByDefault(DoAll(SaveArg<0>(&cecListener), Return(Core::ERROR_NONE)));
+
+        // Capture the IDeviceSettingsHDMIIn::INotification the plugin registers on activation.
+        ON_CALL(*hdmiInMock, Register(_, _))
+            .WillByDefault(DoAll(SaveArg<1>(&hdmiInListener), Return(Core::ERROR_NONE)));
 
         // Static DeviceSettings configuration: HDMI0, HDMI_ARC0, SPEAKER0, SPDIF0, HEADPHONE0
         ON_CALL(*dsMock, GetDeviceSettingConfigs(_))
@@ -213,11 +251,13 @@ protected:
 
     void TearDown() override
     {
+        DrainWorkerPool();
         impl = Core::ProxyType<TestableAudioOutputImplementation>();
 
         dsPluginSink = nullptr;
         dsListener   = nullptr;
         cecListener  = nullptr;
+        hdmiInListener = nullptr;
 
         DeviceSettingsMock::Delete();
 
@@ -280,20 +320,12 @@ protected:
             .WillByDefault(DoAll(SetArgReferee<1>(connected), Return(Core::ERROR_NONE)));
     }
 
-    void ExposeHdmiCecSink()
-    {
-        ON_CALL(service, QueryInterfaceByCallsign(::testing::Eq(static_cast<uint32_t>(Exchange::IHdmiCecSink::ID)),
-                                                  ::testing::Eq(kCecCallsign)))
-            .WillByDefault([this](const uint32_t, const std::string&) -> void* {
-                return static_cast<void*>(static_cast<Exchange::IHdmiCecSink*>(&hdmiCecSinkMock));
-            });
-    }
-
     // Configure() opens the DSHelper link; the initial cache priming runs on the worker pool.
     void ConfigureAndWait(unsigned int activations = 1)
     {
         ASSERT_EQ(Core::ERROR_NONE, impl->Configure(&service));
         ASSERT_TRUE(impl->WaitForActivations(activations)) << "DeviceSettings activation was not processed";
+        DrainWorkerPool(); // cache priming runs asynchronously after the activation
         ASSERT_NE(dsListener, nullptr) << "Plugin did not register IDeviceSettingsAudio::INotification";
     }
 
@@ -308,14 +340,88 @@ protected:
     {
         ASSERT_NE(dsListener, nullptr);
         dsListener->OnDolbyAtmosCapabilitiesChanged(capability, true);
+        DrainWorkerPool(); // events are dispatched asynchronously
     }
 
+    void FireAudioMode(AudioPort port, StereoMode mode)
+    {
+        ASSERT_NE(dsListener, nullptr);
+        dsListener->OnAudioModeEvent(port, mode);
+        DrainWorkerPool(); // events are dispatched asynchronously
+    }
+
+    // Exposes org.rdk.HdmiCecSink so Configure() registers the CEC notification.
+    void ExposeHdmiCecSink()
+    {
+        ON_CALL(service, QueryInterfaceByCallsign(::testing::Eq(static_cast<uint32_t>(Exchange::IHdmiCecSink::ID)),
+                                                  ::testing::Eq(kCecCallsign)))
+            .WillByDefault(Return(static_cast<void*>(static_cast<Exchange::IHdmiCecSink*>(&hdmiCecSinkMock))));
+    }
+
+    // HDMI0 is the only enabled port and its passthrough stereo mode selects it as the sound mode.
+    void SetupHdmiPassthrough(AtmosCap capability)
+    {
+        SetPortEnabled(kHdmiHandle, true);
+        SetAtmosCapability(kHdmiHandle, capability);
+        SetStereoMode(kHdmiHandle, Audio::AUDIO_STEREO_PASSTHROUGH);
+    }
+
+    // Delivers an HDMI-In hot plug event to the plugin's registered listener (port 0).
+    void FireHdmiInHotPlug(bool connected)
+    {
+        ASSERT_NE(hdmiInListener, nullptr) << "Plugin did not register IDeviceSettingsHDMIIn::INotification";
+        hdmiInListener->OnHDMIInEventHotPlug(HdmiInIface::HDMIInPort{}, connected);
+    }
+};
+
 // ===========================================================================
-// Tests: DolbyAtmosExperience — default state
+// Tests: construction without DeviceSettings
 // ===========================================================================
 
 // After construction only (no Configure, no callbacks), state must be false.
 TEST_F(AudioOutputImplementationTest, DolbyAtmosExperience_DefaultIsFalse)
+{
+    bool enabled = true; // intentionally wrong starting value
+    EXPECT_EQ(Core::ERROR_NONE, impl->DolbyAtmosExperience(enabled));
+    EXPECT_FALSE(enabled) << "Default dolbyAtmosExperience must be false";
+}
+
+TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_AudioOutput)
+{
+    auto* iface = static_cast<Exchange::IAudioOutput*>(impl->QueryInterface(Exchange::IAudioOutput::ID));
+    ASSERT_NE(iface, nullptr) << "QueryInterface(IAudioOutput::ID) must return non-null";
+    iface->Release();
+}
+
+TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_Configuration)
+{
+    auto* iface = static_cast<Exchange::IConfiguration*>(impl->QueryInterface(Exchange::IConfiguration::ID));
+    ASSERT_NE(iface, nullptr) << "QueryInterface(IConfiguration::ID) must return non-null";
+    iface->Release();
+}
+
+// ===========================================================================
+// Tests: Configure() / DeviceSettings activation
+// ===========================================================================
+
+// Nothing enabled: AtmosMetadata falls back to SPEAKER0 (NOT_SUPPORTED), no sound mode port.
+TEST_F(AudioOutputImplementationTest, Configure_NoPortsEnabled_ReturnsFalse)
+{
+    TEST_LOG("Configure: no enabled ports");
+
+    ConfigureAndWait();
+    EXPECT_FALSE(DolbyAtmosExperience());
+}
+
+TEST_F(AudioOutputImplementationTest, Configure_RegistersAudioNotificationWithClientName)
+{
+    TEST_LOG("Configure: IDeviceSettingsAudio::Register called with the AudioOutput client name");
+
+    EXPECT_CALL(*audioMock, Register(::testing::Eq(std::string("AudioOutput")), _)).Times(1);
+    ConfigureAndWait();
+}
+
+TEST_F(AudioOutputImplementationTest, Configure_HdmiCecSinkUnavailable_StillSucceeds)
 {
     TEST_LOG("Configure: HdmiCecSink unavailable -> still ERROR_NONE");
 
@@ -770,38 +876,6 @@ TEST_F(AudioOutputImplementationTest, Unregister_NotFound_ReturnsNone)
 }
 
 // ===========================================================================
-// Tests: HdmiCecSink ReportAudioDevicePowerStatus
-//
-// The first report after boot invalidates the cached values so the next
-// DolbyAtmosExperience() call re-queries DeviceSettings; later reports are ignored.
-// ===========================================================================
-TEST_F(AudioOutputImplementationTest, CecPowerStatus_FirstReportTriggersRequery_LaterReportsIgnored)
-{
-    TEST_LOG("ReportAudioDevicePowerStatus: first report re-queries, later reports ignored");
-
-    ExposeHdmiCecSink();
-    ConfigureAndWait();
-    ASSERT_NE(cecListener, nullptr);
-    ASSERT_FALSE(DolbyAtmosExperience());
-
-    // External audio device capabilities become available after boot.
-    SetPortEnabled(kHdmiHandle, true);
-    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_METADATA);
-    SetStereoMode(kHdmiHandle, Audio::AUDIO_STEREO_PASSTHROUGH);
-
-    // Cached value is used until the CEC report arrives.
-    EXPECT_FALSE(DolbyAtmosExperience());
-
-    cecListener->ReportAudioDevicePowerStatus(0);
-    EXPECT_TRUE(DolbyAtmosExperience()) << "First CEC report must force a re-query";
-
-    // Capability disappears again, but a second CEC report is ignored -> cached value kept.
-    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
-    cecListener->ReportAudioDevicePowerStatus(0);
-    EXPECT_TRUE(DolbyAtmosExperience());
-}
-
-// ===========================================================================
 // Tests: DeviceSettings plugin lifecycle (deactivation / re-activation / teardown)
 // ===========================================================================
 
@@ -826,20 +900,205 @@ TEST_F(AudioOutputImplementationTest, Reactivation_ReRegistersAudioNotificationA
 
     dsPluginSink->Activated(kDsCallsign, &service);
     ASSERT_TRUE(impl->WaitForActivations(2));
+    DrainWorkerPool();
 
     EXPECT_TRUE(DolbyAtmosExperience());
 }
 
-TEST_F(AudioOutputImplementationTest, Destructor_UnregistersDeviceSettingsAndCecNotifications)
+TEST_F(AudioOutputImplementationTest, Destructor_UnregistersDeviceSettingsNotifications)
 {
-    TEST_LOG("Destructor unregisters IDeviceSettingsAudio and HdmiCecSink notifications");
+    TEST_LOG("Destructor unregisters IDeviceSettingsAudio and the DeviceSettings plugin notification");
 
-    ExposeHdmiCecSink();
     ConfigureAndWait();
 
     EXPECT_CALL(*audioMock, Unregister(_)).Times(1);
-    EXPECT_CALL(hdmiCecSinkMock, Unregister(_)).Times(1);
     EXPECT_CALL(service, Unregister(::testing::A<PluginHost::IPlugin::INotification*>())).Times(1);
 
     impl = Core::ProxyType<TestableAudioOutputImplementation>();
+}
+
+// ===========================================================================
+// Tests: HDMI-In hot plug (IDeviceSettingsHDMIIn::INotification::OnHDMIInEventHotPlug)
+// A hot plug sets a re-query flag; the next DolbyAtmosExperience() re-reads the sink capability.
+// ===========================================================================
+
+TEST_F(AudioOutputImplementationTest, HdmiInHotPlug_Connected_ForcesMetadataRequeryOnNextRead)
+{
+    TEST_LOG("HDMI-In connect event -> next DolbyAtmosExperience re-queries the sink capability");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    ConfigureAndWait();
+    ASSERT_NE(hdmiInListener, nullptr);
+    ASSERT_FALSE(DolbyAtmosExperience());
+
+    // The sink now reports Atmos, but the cache is only refreshed after the hot plug.
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    FireHdmiInHotPlug(true);
+
+    EXPECT_TRUE(DolbyAtmosExperience());
+}
+
+TEST_F(AudioOutputImplementationTest, HdmiInHotPlug_Disconnected_ForcesMetadataRequeryOnNextRead)
+{
+    TEST_LOG("HDMI-In disconnect event -> next DolbyAtmosExperience re-queries the sink capability");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    ConfigureAndWait();
+    ASSERT_NE(hdmiInListener, nullptr);
+    ASSERT_TRUE(DolbyAtmosExperience());
+
+    // The sink no longer reports Atmos once unplugged; the stale cached value must be replaced.
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    FireHdmiInHotPlug(false);
+
+    EXPECT_FALSE(DolbyAtmosExperience());
+}
+
+// Negative baseline: without a hot plug the device capability is never re-queried.
+TEST_F(AudioOutputImplementationTest, HdmiInHotPlug_NoEvent_DoesNotRequeryMetadata)
+{
+    TEST_LOG("No HDMI-In event -> cached value is served and the sink is not queried again");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    ConfigureAndWait();
+    ASSERT_NE(hdmiInListener, nullptr);
+
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    EXPECT_CALL(*audioMock, GetAudioSinkDeviceAtmosCapability(_, _)).Times(0);
+
+    EXPECT_TRUE(DolbyAtmosExperience());
+    EXPECT_TRUE(DolbyAtmosExperience());
+}
+
+// Repeated hot plug events coalesce into one re-query; the flag is consumed by the first read.
+TEST_F(AudioOutputImplementationTest, HdmiInHotPlug_RepeatedEvents_RequeryExactlyOnce)
+{
+    TEST_LOG("Several hot plug events before a read -> exactly one capability query");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    ConfigureAndWait();
+    ASSERT_NE(hdmiInListener, nullptr);
+    ASSERT_FALSE(DolbyAtmosExperience());
+
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    EXPECT_CALL(*audioMock, GetAudioSinkDeviceAtmosCapability(kHdmiHandle, _)).Times(1);
+
+    FireHdmiInHotPlug(true);
+    FireHdmiInHotPlug(false);
+    FireHdmiInHotPlug(true);
+
+    EXPECT_TRUE(DolbyAtmosExperience());
+    EXPECT_TRUE(DolbyAtmosExperience()); // flag already consumed: no second query
+}
+
+// Re-query during a DeviceSettings outage fails with ERROR_GENERAL and keeps the flag,
+// so the next read after DeviceSettings returns re-queries successfully.
+TEST_F(AudioOutputImplementationTest, HdmiInHotPlug_RequeryFailsWhileDeviceSettingsDown_RetriesAfterReactivation)
+{
+    TEST_LOG("Hot plug + DS deactivated -> ERROR_GENERAL; DS reactivated -> refreshed value");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    ConfigureAndWait();
+    ASSERT_NE(dsPluginSink, nullptr);
+    ASSERT_NE(hdmiInListener, nullptr);
+    ASSERT_FALSE(DolbyAtmosExperience());
+
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    FireHdmiInHotPlug(true);
+
+    // IDeviceSettingsAudio (needed by SoundMode) is gone, so the re-query fails.
+    dsPluginSink->Deactivated(kDsCallsign, &service);
+    bool enabled = false;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->DolbyAtmosExperience(enabled));
+
+    // DeviceSettings returns; the activation path re-primes the cache.
+    dsPluginSink->Activated(kDsCallsign, &service);
+    ASSERT_TRUE(impl->WaitForActivations(2));
+    DrainWorkerPool();
+
+    EXPECT_TRUE(DolbyAtmosExperience());
+}
+
+// Only OnHDMIInEventHotPlug triggers a re-query; the other HDMI-In callbacks are no-ops.
+TEST_F(AudioOutputImplementationTest, HdmiInCallbacks_OtherThanHotPlug_DoNotRequeryMetadata)
+{
+    TEST_LOG("Non-hot-plug HDMI-In callbacks leave the cached Atmos state untouched");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    ConfigureAndWait();
+    ASSERT_NE(hdmiInListener, nullptr);
+    ASSERT_FALSE(DolbyAtmosExperience());
+
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    EXPECT_CALL(*audioMock, GetAudioSinkDeviceAtmosCapability(_, _)).Times(0);
+
+    using Port = HdmiInIface::HDMIInPort;
+    HdmiInIface::HDMIVideoPortResolution resolution{};
+    hdmiInListener->OnHDMIInEventSignalStatus(Port{}, HdmiInIface::HDMIInSignalStatus{});
+    hdmiInListener->OnHDMIInEventStatus(Port{}, true);
+    hdmiInListener->OnHDMIInVideoModeUpdate(Port{}, resolution);
+    hdmiInListener->OnHDMIInAllmStatus(Port{}, true);
+    hdmiInListener->OnHDMIInAVIContentType(Port{}, HdmiInIface::HDMIInAviContentType{});
+    hdmiInListener->OnHDMIInVRRStatus(Port{}, HdmiInIface::HDMIInVRRType{});
+
+    EXPECT_FALSE(DolbyAtmosExperience());
+}
+
+// ===========================================================================
+// Tests: CEC power status (first report forces a re-query)
+// ===========================================================================
+
+TEST_F(AudioOutputImplementationTest, CecPowerStatus_FirstReportForcesRequery_RepeatedReportsIgnored)
+{
+    TEST_LOG("First CEC power report -> re-query; later reports do not refresh the cache");
+
+    ExposeHdmiCecSink();
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    ConfigureAndWait();
+    ASSERT_NE(cecListener, nullptr) << "Plugin did not register IHdmiCecSink::INotification";
+    ASSERT_FALSE(DolbyAtmosExperience());
+
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    cecListener->ReportAudioDevicePowerStatus(1);
+    EXPECT_TRUE(DolbyAtmosExperience());
+
+    // Second report is ignored, so the sink is not queried and the cached value stays.
+    SetAtmosCapability(kHdmiHandle, Audio::AUDIO_DOLBY_ATMOS_NOT_SUPPORTED);
+    cecListener->ReportAudioDevicePowerStatus(1);
+    EXPECT_TRUE(DolbyAtmosExperience());
+}
+
+// ===========================================================================
+// Tests: audio mode events that must be ignored
+// ===========================================================================
+
+// A mode change reported for a disconnected port must not alter the sound mode.
+TEST_F(AudioOutputImplementationTest, Event_AudioModeFromDisconnectedPort_IsIgnored)
+{
+    TEST_LOG("Audio mode event for a disconnected HEADPHONE port -> cached sound mode unchanged");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    SetHeadphoneConnected(false);
+    ConfigureAndWait();
+    ASSERT_TRUE(DolbyAtmosExperience());
+
+    FireAudioMode(Audio::AUDIO_PORT_TYPE_HEADPHONE, Audio::AUDIO_STEREO_STEREO);
+
+    EXPECT_TRUE(DolbyAtmosExperience());
+}
+
+// After DeviceSettings deactivation the audio sub-interface is unavailable; events must be dropped.
+TEST_F(AudioOutputImplementationTest, Event_AudioModeAfterDeviceSettingsDeactivated_IsIgnored)
+{
+    TEST_LOG("Audio mode event while IDeviceSettingsAudio is unavailable -> cache unchanged");
+
+    SetupHdmiPassthrough(Audio::AUDIO_DOLBY_ATMOS_METADATA);
+    ConfigureAndWait();
+    ASSERT_NE(dsPluginSink, nullptr);
+    ASSERT_TRUE(DolbyAtmosExperience());
+
+    dsPluginSink->Deactivated(kDsCallsign, &service);
+    FireAudioMode(Audio::AUDIO_PORT_TYPE_HDMI, Audio::AUDIO_STEREO_STEREO);
+
+    EXPECT_TRUE(DolbyAtmosExperience());
 }
