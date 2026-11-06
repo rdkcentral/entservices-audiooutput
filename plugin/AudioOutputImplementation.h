@@ -24,6 +24,7 @@
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IConfiguration.h>
 #include <interfaces/IDeviceSettingsAudio.h>
+#include <interfaces/IHdmiCecSink.h>
 
 #include <com/com.h>
 #include <core/core.h>
@@ -69,11 +70,118 @@ namespace Plugin {
         void OnDeviceSettingsDeactivated() override;
 
     private:
-        enum Event {
-            EV_ATMOS_EXP_CHANGED = 0
+        class HdmiCecSinkNotification : public Exchange::IHdmiCecSink::INotification {
+        private:
+            HdmiCecSinkNotification(const HdmiCecSinkNotification&) = delete;
+            HdmiCecSinkNotification& operator=(const HdmiCecSinkNotification&) = delete;
+
+        public:
+            explicit HdmiCecSinkNotification(AudioOutputImplementation* parent)
+                : _parent(*parent)
+            {
+                ASSERT(parent != nullptr);
+            }
+            ~HdmiCecSinkNotification() override = default;
+
+            BEGIN_INTERFACE_MAP(HdmiCecSinkNotification)
+            INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
+            END_INTERFACE_MAP
+
+            void ReportAudioDevicePowerStatus(const int powerStatus) override
+            {
+                _parent.ReportAudioDevicePowerStatus(powerStatus);
+            }
+
+        private:
+            AudioOutputImplementation& _parent;
         };
 
-        // Event payload: first = new dolbyAtmosExperience value; second unused.
+        // DS HDMI-In event delegate — a hot plug (e.g. ARC device) triggers a re-evaluation of the Atmos experience.
+        class DSHDMIInNotification : public Exchange::IDeviceSettingsHDMIIn::INotification {
+        private:
+            DSHDMIInNotification(const DSHDMIInNotification&) = delete;
+            DSHDMIInNotification& operator=(const DSHDMIInNotification&) = delete;
+
+        public:
+            explicit DSHDMIInNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~DSHDMIInNotification() override = default;
+
+            void OnHDMIInEventHotPlug(const Exchange::IDeviceSettingsHDMIIn::HDMIInPort port,
+                                      const bool isConnected) override
+            {
+                _parent.OnHdmiInEventHotPlug(static_cast<int>(port), isConnected);
+            }
+
+            void OnHDMIInEventSignalStatus(const Exchange::IDeviceSettingsHDMIIn::HDMIInPort,
+                                           const Exchange::IDeviceSettingsHDMIIn::HDMIInSignalStatus) override {}
+            void OnHDMIInEventStatus(const Exchange::IDeviceSettingsHDMIIn::HDMIInPort, const bool) override {}
+            void OnHDMIInVideoModeUpdate(const Exchange::IDeviceSettingsHDMIIn::HDMIInPort,
+                                         const Exchange::IDeviceSettingsHDMIIn::HDMIVideoPortResolution&) override {}
+            void OnHDMIInAllmStatus(const Exchange::IDeviceSettingsHDMIIn::HDMIInPort, const bool) override {}
+            void OnHDMIInAVIContentType(const Exchange::IDeviceSettingsHDMIIn::HDMIInPort,
+                                        const Exchange::IDeviceSettingsHDMIIn::HDMIInAviContentType) override {}
+            void OnHDMIInVRRStatus(const Exchange::IDeviceSettingsHDMIIn::HDMIInPort,
+                                   const Exchange::IDeviceSettingsHDMIIn::HDMIInVRRType) override {}
+
+            BEGIN_INTERFACE_MAP(DSHDMIInNotification)
+                INTERFACE_ENTRY(Exchange::IDeviceSettingsHDMIIn::INotification)
+            END_INTERFACE_MAP
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
+
+        // DS Audio event delegate — receives DeviceSettings audio notifications over
+        // COM-RPC and forwards them to the parent implementation.
+        class DSAudioNotification : public Exchange::IDeviceSettingsAudio::INotification {
+        private:
+            DSAudioNotification(const DSAudioNotification&) = delete;
+            DSAudioNotification& operator=(const DSAudioNotification&) = delete;
+
+        public:
+            explicit DSAudioNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~DSAudioNotification() override = default;
+
+            void OnDolbyAtmosCapabilitiesChanged(
+                Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
+                bool status) override
+            {
+                _parent.dispatchEvent(EV_ATMOS_CAPABILITY_CHANGE,
+                    ParamsType{ static_cast<int32_t>(atmosCapability), static_cast<int32_t>(status) });
+            }
+
+            void OnAudioModeEvent(
+                Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
+                Exchange::IDeviceSettingsAudio::StereoMode audioMode) override
+            {
+                _parent.dispatchEvent(EV_AUDIOMODE_CHANGE,
+                    ParamsType{ static_cast<int32_t>(audioPortType), static_cast<int32_t>(audioMode) });
+            }
+
+            BEGIN_INTERFACE_MAP(DSAudioNotification)
+                INTERFACE_ENTRY(Exchange::IDeviceSettingsAudio::INotification)
+            END_INTERFACE_MAP
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
+
+    private:
+        enum Event {
+            EV_AUDIOMODE_CHANGE = 0,
+            EV_ATMOS_CAPABILITY_CHANGE,
+            EV_REEVALUATE_ATMOS,
+            EV_ATMOS_EXP_CHANGED
+        };
+
+        // Event payload: (port type, stereo mode), (atmos capability, status) or (new dolbyAtmosExperience, unused)
+        // depending on the event; unused for EV_REEVALUATE_ATMOS.
         struct ParamsType {
             int32_t first;
             int32_t second;
@@ -122,6 +230,14 @@ namespace Plugin {
         bool EvaluateCurrentAtmosExperience(Exchange::IAudioOutput::AudioModes mode, bool cap) const;
 
         void SendNotify(bool dolbyAtmosExperience);
+        void NotifyIfAtmosExperienceChanged(Exchange::IAudioOutput::AudioModes mode, bool cap);
+        void ReevaluateAtmosExperience();
+        void OnHdmiInEventHotPlug(int port, bool isConnected);
+        void onAudioModeChanged(Exchange::IDeviceSettingsAudio::AudioPortType audioPortType,
+                                Exchange::IDeviceSettingsAudio::StereoMode audioMode);
+        void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
+                                        bool status);
+        void ReportAudioDevicePowerStatus(const int powerStatus);
         void Dispatch(Event ev, const ParamsType& params);
         void dispatchEvent(Event ev, const ParamsType& params);
 
@@ -132,8 +248,19 @@ namespace Plugin {
         mutable std::atomic<bool> _dolbyAtmosExperience{false};
         std::atomic<bool> _dsActivated{false};
 
+        // Only the first ReportAudioDevicePowerStatus after boot triggers a re-evaluation; later reports are frequent.
+        std::atomic<bool> _externalArcEnabled{false};
+
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
+
+        // DeviceSettings event delegates (COM-RPC); constructed in the constructor initializer list
+        Core::Sink<DSAudioNotification> _dsAudioNotification;
+        Core::Sink<DSHDMIInNotification> _dsHdminNotification;
+
+        // HdmiCecSink (optional) and its notification
+        Exchange::IHdmiCecSink* _hdmiCecSink{nullptr};
+        Core::Sink<HdmiCecSinkNotification> _hdmiCecSinkNotification;
     };
 
 } // namespace Plugin
