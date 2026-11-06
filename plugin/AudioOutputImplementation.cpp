@@ -195,7 +195,12 @@ namespace Plugin {
     void AudioOutputImplementation::NotifyIfAtmosExperienceChanged(Exchange::IAudioOutput::AudioModes mode, bool cap)
     {
         const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
-        if (_dolbyAtmosExperience.exchange(newValue) != newValue) {
+        _adminLock.Lock();
+        const bool changed = (_dolbyAtmosExperience != newValue);
+        _dolbyAtmosExperience = newValue;
+        _adminLock.Unlock();
+
+        if (changed) {
             LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
             dispatchEvent(EV_ATMOS_EXP_CHANGED, ParamsType{ static_cast<int32_t>(newValue), 0 });

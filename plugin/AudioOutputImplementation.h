@@ -244,8 +244,8 @@ namespace Plugin {
     private:
         mutable Core::CriticalSection _adminLock;
 
-        // Last value reported; used only to detect changes for notification
-        mutable std::atomic<bool> _dolbyAtmosExperience{false};
+        // Last value reported; used only to detect changes for notification. Guarded by _adminLock.
+        bool _dolbyAtmosExperience{false};
         std::atomic<bool> _dsActivated{false};
 
         // Only the first ReportAudioDevicePowerStatus after boot triggers a re-evaluation; later reports are frequent.
