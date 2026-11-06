@@ -46,12 +46,14 @@ namespace Plugin {
     // -------------------------------------------------------------------------
 
     AudioOutputImplementation::AudioOutputImplementation()
+        : _hdmiCecSinkNotification(this)
     {
         LOGINFO("AudioOutputImplementation Constructor");
 
         try {
             device::Manager::Initialize();
             LOGINFO("device::Manager::Initialize success");
+            registerDsEventHandlers();
         } catch (const device::Exception& err) {
             LOGWARN("device::Manager::Initialize failed : {%s}", err.what());
         }
@@ -61,7 +63,14 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation Destructor");
 
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Unregister(&_hdmiCecSinkNotification);
+            _hdmiCecSink->Release();
+            _hdmiCecSink = nullptr;
+        }
+
         try {
+            unregisterDsEventHandlers();
             device::Manager::DeInitialize();
             LOGINFO("device::Manager::DeInitialize success");
         } catch (const device::Exception& err) {
@@ -72,7 +81,66 @@ namespace Plugin {
     uint32_t AudioOutputImplementation::Configure(PluginHost::IShell* service)
     {
         ASSERT(service != nullptr);
+
+        _hdmiCecSink = service->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Register(&_hdmiCecSinkNotification);
+            LOGINFO("Configure: registered for HdmiCecSink ReportAudioDevicePowerStatus notification");
+        } else {
+            LOGWARN("Configure: HdmiCecSink not available, ReportAudioDevicePowerStatus will not be received");
+        }
+
         return Core::ERROR_NONE;
+    }
+
+    void AudioOutputImplementation::registerDsEventHandlers()
+    {
+        if (!_registeredDsEventHandlers) {
+            device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]");
+            device::Host::getInstance().Register(&_dsHdmiInNotification, "WPE[AudioOutput]");
+            _registeredDsEventHandlers = true;
+            LOGINFO("Registered for IAudioOutputPortEvents and IHdmiInEvents");
+        }
+    }
+
+    void AudioOutputImplementation::unregisterDsEventHandlers()
+    {
+        if (_registeredDsEventHandlers) {
+            device::Host::getInstance().UnRegister(&_dsAudioPortNotification);
+            device::Host::getInstance().UnRegister(&_dsHdmiInNotification);
+            _registeredDsEventHandlers = false;
+            LOGINFO("Unregistered from IAudioOutputPortEvents and IHdmiInEvents");
+        }
+    }
+
+    void AudioOutputImplementation::OnHdmiInEventHotPlug(int port, bool isConnected)
+    {
+        LOGINFO("Received OnHdmiInEventHotPlug callback, port: %d, isConnected: %s", port, isConnected ? "true" : "false");
+        dispatchEvent(EV_REEVALUATE_ATMOS, ParamsType{ 0, 0 });
+    }
+
+    void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
+    {
+        if (!_externalArcEnabled.exchange(true)) {
+            LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
+            dispatchEvent(EV_REEVALUATE_ATMOS, ParamsType{ 0, 0 });
+        }
+    }
+
+    // Queries both HAL values and notifies if the derived Atmos experience changed.
+    void AudioOutputImplementation::ReevaluateAtmosExperience()
+    {
+        bool cap = false;
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+
+        const bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
+        const bool soundErr = (SoundMode(mode) != Core::ERROR_NONE);
+        if (atmosErr || soundErr) {
+            LOGERR("ReevaluateAtmosExperience: failed (atmosMetadata=%s, soundMode=%s)",
+                   atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
+            return;
+        }
+        NotifyIfAtmosExperienceChanged(mode, cap);
     }
 
     void AudioOutputImplementation::dispatchEvent(Event ev, const ParamsType& params)
@@ -82,8 +150,31 @@ namespace Plugin {
 
     void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
     {
-        if (ev == EV_ATMOS_EXP_CHANGED) {
+        if (ev == EV_AUDIOMODE_CHANGE) {
+            onAudioModeChanged(static_cast<dsAudioPortType_t>(params.first),
+                               static_cast<dsAudioStereoMode_t>(params.second));
+        } else if (ev == EV_ATMOS_CAPABILITY_CHANGE) {
+            onAtmosCapabilitiesChanged(static_cast<dsATMOSCapability_t>(params.first), params.second != 0);
+        } else if (ev == EV_REEVALUATE_ATMOS) {
+            ReevaluateAtmosExperience();
+        } else if (ev == EV_ATMOS_EXP_CHANGED) {
             SendNotify(params.first != 0);
+        }
+    }
+
+    void AudioOutputImplementation::NotifyIfAtmosExperienceChanged(Exchange::IAudioOutput::AudioModes mode, bool cap)
+    {
+        const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
+
+        _adminLock.Lock();
+        const bool changed = (_dolbyAtmosExperience != newValue);
+        _dolbyAtmosExperience = newValue;
+        _adminLock.Unlock();
+
+        if (changed) {
+            LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
+                    newValue ? "true" : "false");
+            dispatchEvent(EV_ATMOS_EXP_CHANGED, ParamsType{ static_cast<int32_t>(newValue), 0 });
         }
     }
 
@@ -105,20 +196,9 @@ namespace Plugin {
             return Core::ERROR_GENERAL;
         }
 
-        const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
-        enabled = newValue;
-
-        _adminLock.Lock();
-        const bool changed = (_dolbyAtmosExperience != newValue);
-        _dolbyAtmosExperience = newValue;
-        _adminLock.Unlock();
-
-        if (changed) {
-            LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
-                    newValue ? "true" : "false");
-            const_cast<AudioOutputImplementation*>(this)->dispatchEvent(
-                EV_ATMOS_EXP_CHANGED, ParamsType{ static_cast<int32_t>(newValue), 0 });
-        }
+        enabled = EvaluateCurrentAtmosExperience(mode, cap);
+        LOGERR("DolbyAtmosExperience: enabled=%s", enabled ? "true" : "false");
+        
         return Core::ERROR_NONE;
     }
 
@@ -162,7 +242,66 @@ namespace Plugin {
 
         return Core::ERROR_NONE;
     }
-    
+
+    // -------------------------------------------------------------------------
+    // onAudioModeChanged
+    // DS HAL callback for OnAudioModeEvent (IAudioOutputPortEvents)
+    // -------------------------------------------------------------------------
+
+    void AudioOutputImplementation::onAudioModeChanged(dsAudioPortType_t portType, dsAudioStereoMode_t smode)
+    {
+        LOGINFO("AudioOutputImplementation::onAudioModeChanged: portType=%d, smode=%d",
+                static_cast<int>(portType), static_cast<int>(smode));
+
+        bool isAudioModeChanged = false;
+
+        try {
+            device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
+            for (size_t i = 0; i < aPorts.size(); i++) {
+                device::AudioOutputPort &aPort = aPorts.at(i);
+                if (aPort.isEnabled() && aPort.isConnected()) {
+                    auto typeId = aPort.getType().getId();
+                    if (typeId == portType) {
+                        isAudioModeChanged = true;
+                        break;
+                    } else {
+                        // Ignore invalid event when Audiomode set for hdmi_arc0 while no external devices connected(speaker0)
+                        TRACE(Trace::Warning, (_T("Audio Mode not changed for connected port %s"), aPort.getName().c_str()));
+                    }
+                }
+            }
+        } catch (const device::Exception& err) {
+            TRACE(Trace::Error, (_T("Exception during DeviceSetting library call. code = %d message = %s"), err.getCode(), err.what()));
+        }
+
+        if (isAudioModeChanged) {
+            bool cap = false;
+            if (AtmosMetadata(cap) != Core::ERROR_NONE) {
+                LOGERR("onAudioModeChanged: AtmosMetadata() query failed");
+                return;
+            }
+            NotifyIfAtmosExperienceChanged(DsAudioModeToSoundMode(device::AudioStereoMode(smode)), cap);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // onAtmosCapabilitiesChanged
+    // DS HAL callback for OnDolbyAtmosCapabilitiesChanged
+    // -------------------------------------------------------------------------
+
+    void AudioOutputImplementation::onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status)
+    {
+        LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: atmosCapability=%d, status=%d",
+                atmosCapability, static_cast<int>(status));
+
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+        if (SoundMode(mode) != Core::ERROR_NONE) {
+            LOGERR("onAtmosCapabilitiesChanged: SoundMode() query failed");
+            return;
+        }
+        NotifyIfAtmosExperienceChanged(mode, atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
+    }
+
     // -------------------------------------------------------------------------
     // Private: SendNotify
     // -------------------------------------------------------------------------

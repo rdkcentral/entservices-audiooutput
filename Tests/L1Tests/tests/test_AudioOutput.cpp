@@ -35,6 +35,7 @@
 #include "AudioOutputPortMock.h"       // defines AudioOutputPortMock
 #include "AudioOutputPortTypeMock.h"   // defines AudioOutputPortTypeMock
 #include "ManagerMock.h"               // defines ManagerImplMock
+#include "HdmiCecSinkMock.h"           // defines HdmiCecSinkMock
 
 #define TEST_LOG(x, ...) \
     fprintf(stderr, "\033[1;32m[%s:%d](%s)<PID:%d><TID:%d>" x "\n\033[0m", \
@@ -127,6 +128,12 @@ protected:
     NiceMock<AudioOutputPortMock>     audioOutputPortMock;
     NiceMock<AudioOutputPortTypeMock> audioOutputPortTypeMock;
     NiceMock<ManagerImplMock>         managerImplMock;
+    NiceMock<HdmiCecSinkMock>         cecMock;
+
+    // Listeners the plugin registers; captured so tests can fire the DS / CEC events directly.
+    device::Host::IAudioOutputPortEvents*          audioListener{nullptr};
+    device::Host::IHdmiInEvents*                   hdmiListener{nullptr};
+    Exchange::IHdmiCecSink::INotification*         cecNotification{nullptr};
 
     device::AudioOutputPortType portTypeObj;
     device::AudioOutputPort     portObj;
@@ -158,11 +165,21 @@ protected:
             .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
         ON_CALL(hostImplMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(portObj));
 
+        ON_CALL(hostImplMock, Register(testing::A<device::Host::IAudioOutputPortEvents*>()))
+            .WillByDefault(DoAll(SaveArg<0>(&audioListener), Return(dsERR_NONE)));
+        ON_CALL(hostImplMock, Register(testing::A<device::Host::IHdmiInEvents*>()))
+            .WillByDefault(DoAll(SaveArg<0>(&hdmiListener), Return(dsERR_NONE)));
+        ON_CALL(cecMock, Register(_))
+            .WillByDefault(DoAll(SaveArg<0>(&cecNotification), Return(Core::ERROR_NONE)));
+
         workerPool = Core::ProxyType<TestWorkerPool>::Create(2, Core::Thread::DefaultStackSize(), 16);
         Core::IWorkerPool::Assign(&(*workerPool));
         workerPool->Run();
 
         impl = Core::ProxyType<Plugin::AudioOutputImplementation>::Create();
+
+        ASSERT_NE(audioListener, nullptr) << "Plugin did not register for IAudioOutputPortEvents";
+        ASSERT_NE(hdmiListener, nullptr) << "Plugin did not register for IHdmiInEvents";
     }
 
     void TearDown() override
@@ -212,6 +229,59 @@ protected:
         bool enabled = false;
         EXPECT_EQ(expected, impl->DolbyAtmosExperience(enabled));
         return enabled;
+    }
+
+    // DS HAL events — dispatched to the worker pool by the plugin.
+    void FireAtmosCapability(dsATMOSCapability_t cap)
+    {
+        audioListener->OnDolbyAtmosCapabilitiesChanged(cap, true);
+    }
+
+    void FireAudioMode(int portType, dsAudioStereoMode_t smode)
+    {
+        audioListener->OnAudioModeEvent(static_cast<dsAudioPortType_t>(portType), smode);
+    }
+
+    void FireHdmiHotPlug(bool connected)
+    {
+        hdmiListener->OnHdmiInEventHotPlug(dsHDMI_IN_PORT_0, connected);
+    }
+
+    // Configure() with HdmiCecSink available; fills cecNotification.
+    void ConfigureWithCec()
+    {
+        NiceMock<ServiceMock> serviceMock;
+        ON_CALL(serviceMock, QueryInterfaceByCallsign(static_cast<uint32_t>(Exchange::IHdmiCecSink::ID), _))
+            .WillByDefault(Return(static_cast<void*>(static_cast<Exchange::IHdmiCecSink*>(&cecMock))));
+        EXPECT_EQ(Core::ERROR_NONE, impl->Configure(&serviceMock));
+        ASSERT_NE(cecNotification, nullptr) << "Plugin did not register for HdmiCecSink notifications";
+    }
+
+    // Registers an observer expecting exactly one OnDolbyAtmosExperienceChanged(value).
+    Core::ProxyType<MockAudioOutputNotification> ExpectNotification(NotificationSignal& signal, bool value)
+    {
+        auto observer = Core::ProxyType<MockAudioOutputNotification>::Create();
+        impl->Register(&(*observer));
+        EXPECT_CALL(*observer, OnDolbyAtmosExperienceChanged(value))
+            .Times(1)
+            .WillOnce(Invoke([&](bool) { signal.Notify(); }));
+        return observer;
+    }
+
+    // Registers an observer that must never be notified.
+    Core::ProxyType<MockAudioOutputNotification> ExpectNoNotification()
+    {
+        auto observer = Core::ProxyType<MockAudioOutputNotification>::Create();
+        impl->Register(&(*observer));
+        EXPECT_CALL(*observer, OnDolbyAtmosExperienceChanged(_)).Times(0);
+        return observer;
+    }
+
+    // Gives an unexpected asynchronous notification time to surface.
+    static void Settle()
+    {
+        NotificationSignal none;
+        none.WaitFor(1, 200);
     }
 };
 
@@ -363,110 +433,277 @@ TEST_F(AudioOutputImplementationTest, DolbyAtmosExperience_RecoversAfterHalFailu
 }
 
 // ===========================================================================
-// Notifications — fired asynchronously when the computed value changes
+// Notifications — DolbyAtmosExperience() is a pure getter; notifications come from
+// DS audio events, HDMI-In hot plug and CEC power status, and fire only on change.
 // ===========================================================================
 
-TEST_F(AudioOutputImplementationTest, Notification_FiredOnFalseToTrueTransition)
+TEST_F(AudioOutputImplementationTest, Getter_NeverNotifies)
 {
-    NotificationSignal signal;
-    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
-    impl->Register(&(*notification));
-    EXPECT_CALL(*notification, OnDolbyAtmosExperienceChanged(true))
-        .Times(1)
-        .WillOnce(Invoke([&](bool) { signal.Notify(); }));
+    auto observer = ExpectNoNotification();
 
     SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
     SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
     EXPECT_TRUE(Query());
+    EXPECT_TRUE(Query());
 
-    EXPECT_TRUE(signal.WaitFor(1));
-    impl->Unregister(&(*notification));
+    Settle();
+    impl->Unregister(&(*observer));
 }
 
-TEST_F(AudioOutputImplementationTest, Notification_FiredOnTrueToFalseTransition)
+TEST_F(AudioOutputImplementationTest, AudioModeEvent_FalseToTrue_Notifies)
 {
+    NotificationSignal signal;
+    auto observer = ExpectNotification(signal, true);
+
     SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
     SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
-
-    // The initial false->true change is dispatched asynchronously. Drain it with a
-    // priming observer so it cannot reach the observer under test after Register().
-    {
-        NotificationSignal primed;
-        auto primer = Core::ProxyType<MockAudioOutputNotification>::Create();
-        impl->Register(&(*primer));
-        EXPECT_CALL(*primer, OnDolbyAtmosExperienceChanged(true))
-            .Times(1)
-            .WillOnce(Invoke([&](bool) { primed.Notify(); }));
-        EXPECT_TRUE(Query());
-        EXPECT_TRUE(primed.WaitFor(1));
-        impl->Unregister(&(*primer));
-    }
-
-    NotificationSignal signal;
-    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
-    impl->Register(&(*notification));
-    EXPECT_CALL(*notification, OnDolbyAtmosExperienceChanged(false))
-        .Times(1)
-        .WillOnce(Invoke([&](bool) { signal.Notify(); }));
-
-    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_STEREO);
-    EXPECT_FALSE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
 
     EXPECT_TRUE(signal.WaitFor(1));
-    impl->Unregister(&(*notification));
+    impl->Unregister(&(*observer));
 }
 
-TEST_F(AudioOutputImplementationTest, Notification_NotFired_WhenValueStaysFalse)
+TEST_F(AudioOutputImplementationTest, AudioModeEvent_TrueToFalse_Notifies)
 {
-    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
-    impl->Register(&(*notification));
-    EXPECT_CALL(*notification, OnDolbyAtmosExperienceChanged(_)).Times(0);
+    NotificationSignal signal;
+    auto observer = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*observer));
+    EXPECT_CALL(*observer, OnDolbyAtmosExperienceChanged(true))
+        .WillOnce(Invoke([&](bool) { signal.Notify(); }));
+    EXPECT_CALL(*observer, OnDolbyAtmosExperienceChanged(false))
+        .WillOnce(Invoke([&](bool) { signal.Notify(); }));
+
+    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
+    EXPECT_TRUE(signal.WaitFor(1));
+
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_STEREO);
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
+    EXPECT_TRUE(signal.WaitFor(2));
+
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, AudioModeEvent_ValueUnchanged_NotifiesOnce)
+{
+    NotificationSignal signal;
+    auto observer = ExpectNotification(signal, true);
+
+    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
+    EXPECT_TRUE(signal.WaitFor(1));
+
+    // PASSTHRU -> DDPLUS keeps the result true
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_DDPLUS);
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_DDPLUS);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+// Event for ARC while only the speaker is connected must be ignored.
+TEST_F(AudioOutputImplementationTest, AudioModeEvent_PortTypeNotConnected_Ignored)
+{
+    auto observer = ExpectNoNotification();
+
+    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+    SetSoundMode(device::AudioOutputPortType::kSPEAKER, portName, dsAUDIO_STEREO_PASSTHRU);
+    FireAudioMode(device::AudioOutputPortType::kARC, dsAUDIO_STEREO_DDPLUS);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, AudioModeEvent_GetPortsThrows_Ignored)
+{
+    auto observer = ExpectNoNotification();
+
+    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+    ON_CALL(hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Throw(device::Exception("getAudioOutputPorts failed")));
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, AudioModeEvent_AtmosMetadataFails_Ignored)
+{
+    auto observer = ExpectNoNotification();
+
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
+    ON_CALL(hostImplMock, getAudioOutputPort(_))
+        .WillByDefault(Throw(device::Exception("getAudioOutputPort failed")));
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, AtmosCapabilityEvent_Supported_Notifies)
+{
+    NotificationSignal signal;
+    auto observer = ExpectNotification(signal, true);
+
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
+    FireAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+
+    EXPECT_TRUE(signal.WaitFor(1));
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, AtmosCapabilityEvent_NotSupported_NotifiesFalse)
+{
+    NotificationSignal signal;
+    auto observer = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*observer));
+    EXPECT_CALL(*observer, OnDolbyAtmosExperienceChanged(true))
+        .WillOnce(Invoke([&](bool) { signal.Notify(); }));
+    EXPECT_CALL(*observer, OnDolbyAtmosExperienceChanged(false))
+        .WillOnce(Invoke([&](bool) { signal.Notify(); }));
+
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
+    FireAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+    EXPECT_TRUE(signal.WaitFor(1));
+
+    FireAtmosCapability(dsAUDIO_ATMOS_NOTSUPPORTED);
+    EXPECT_TRUE(signal.WaitFor(2));
+
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, AtmosCapabilityEvent_ResultStaysFalse_NoNotification)
+{
+    auto observer = ExpectNoNotification();
+
+    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_STEREO);
+    FireAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, AtmosCapabilityEvent_SoundModeFails_Ignored)
+{
+    auto observer = ExpectNoNotification();
+
+    ON_CALL(hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Throw(device::Exception("getAudioOutputPorts failed")));
+    FireAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, HdmiHotPlug_ReevaluatesAndNotifies)
+{
+    NotificationSignal signal;
+    auto observer = ExpectNotification(signal, true);
+
+    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+    SetSoundMode(device::AudioOutputPortType::kARC, arcPortName, dsAUDIO_STEREO_DDPLUS);
+    FireHdmiHotPlug(true);
+
+    EXPECT_TRUE(signal.WaitFor(1));
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, HdmiHotPlug_ValueUnchanged_NoNotification)
+{
+    auto observer = ExpectNoNotification();
 
     SetAtmosCapability(dsAUDIO_ATMOS_NOTSUPPORTED);
     SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_FALSE(Query());
-    EXPECT_FALSE(Query());
+    FireHdmiHotPlug(false);
 
-    // Allow any (unexpected) asynchronous dispatch to surface before verifying
-    NotificationSignal none;
-    EXPECT_FALSE(none.WaitFor(1, 200));
-    impl->Unregister(&(*notification));
+    Settle();
+    impl->Unregister(&(*observer));
 }
 
-TEST_F(AudioOutputImplementationTest, Notification_FiredOnce_WhenValueRepeats)
+TEST_F(AudioOutputImplementationTest, HdmiHotPlug_HalFails_Ignored)
 {
+    auto observer = ExpectNoNotification();
+
+    ON_CALL(hostImplMock, getAudioOutputPort(_))
+        .WillByDefault(Throw(device::Exception("getAudioOutputPort failed")));
+    FireHdmiHotPlug(true);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, CecPowerStatus_FirstReport_ReevaluatesAndNotifies)
+{
+    ConfigureWithCec();
     NotificationSignal signal;
-    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
-    impl->Register(&(*notification));
-    EXPECT_CALL(*notification, OnDolbyAtmosExperienceChanged(true))
-        .Times(1)
-        .WillOnce(Invoke([&](bool) { signal.Notify(); }));
+    auto observer = ExpectNotification(signal, true);
 
     SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
-    SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_TRUE(Query());
-    EXPECT_TRUE(Query());
-    EXPECT_TRUE(Query());
+    SetSoundMode(device::AudioOutputPortType::kARC, arcPortName, dsAUDIO_STEREO_DDPLUS);
+    cecNotification->ReportAudioDevicePowerStatus(0);
 
     EXPECT_TRUE(signal.WaitFor(1));
-    NotificationSignal none;
-    EXPECT_FALSE(none.WaitFor(1, 200));
-    impl->Unregister(&(*notification));
+    impl->Unregister(&(*observer));
+}
+
+// Only the first report after boot is acted on; this event arrives frequently.
+TEST_F(AudioOutputImplementationTest, CecPowerStatus_LaterReports_Ignored)
+{
+    ConfigureWithCec();
+    NotificationSignal signal;
+    auto observer = ExpectNotification(signal, true);
+
+    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+    SetSoundMode(device::AudioOutputPortType::kARC, arcPortName, dsAUDIO_STEREO_DDPLUS);
+    cecNotification->ReportAudioDevicePowerStatus(0);
+    EXPECT_TRUE(signal.WaitFor(1));
+
+    // Would notify false if the second report were evaluated.
+    SetSoundMode(device::AudioOutputPortType::kARC, arcPortName, dsAUDIO_STEREO_STEREO);
+    cecNotification->ReportAudioDevicePowerStatus(0);
+
+    Settle();
+    impl->Unregister(&(*observer));
+}
+
+TEST_F(AudioOutputImplementationTest, CecPowerStatus_HalFails_Ignored)
+{
+    ConfigureWithCec();
+    auto observer = ExpectNoNotification();
+
+    ON_CALL(hostImplMock, getAudioOutputPort(_))
+        .WillByDefault(Throw(device::Exception("getAudioOutputPort failed")));
+    cecNotification->ReportAudioDevicePowerStatus(0);
+
+    Settle();
+    impl->Unregister(&(*observer));
 }
 
 TEST_F(AudioOutputImplementationTest, Notification_NotFired_AfterUnregister)
 {
-    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
-    impl->Register(&(*notification));
-    impl->Unregister(&(*notification));
-    EXPECT_CALL(*notification, OnDolbyAtmosExperienceChanged(_)).Times(0);
+    auto observer = ExpectNoNotification();
+    impl->Unregister(&(*observer));
 
     SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
     SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
 
-    NotificationSignal none;
-    EXPECT_FALSE(none.WaitFor(1, 200));
+    Settle();
+}
+
+TEST_F(AudioOutputImplementationTest, DsStubCallbacks_NoCrash)
+{
+    audioListener->OnAudioOutHotPlug(dsAUDIOPORT_TYPE_HDMI, 0, true);
+    audioListener->OnAudioFormatUpdate(dsAUDIO_FORMAT_PCM);
+    audioListener->OnAudioPortStateChanged(dsAUDIOPORT_STATE_INITIALIZED);
+    audioListener->OnAssociatedAudioMixingChanged(true);
+    audioListener->OnAudioFaderControlChanged(50);
+    audioListener->OnAudioPrimaryLanguageChanged("eng");
+    audioListener->OnAudioSecondaryLanguageChanged("fra");
+
+    EXPECT_FALSE(Query());
 }
 
 // ===========================================================================
@@ -485,11 +722,10 @@ TEST_F(AudioOutputImplementationTest, Register_DuplicateNotification_NotifiedOnc
 
     SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
     SetSoundMode(device::AudioOutputPortType::kHDMI, portName, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
 
     EXPECT_TRUE(signal.WaitFor(1));
-    NotificationSignal none;
-    EXPECT_FALSE(none.WaitFor(1, 200));
+    Settle();
     impl->Unregister(&(*notification));
 }
 
@@ -508,6 +744,22 @@ TEST_F(AudioOutputImplementationTest, Configure_ReturnsNone)
 {
     NiceMock<ServiceMock> serviceMock;
     EXPECT_EQ(Core::ERROR_NONE, impl->Configure(&serviceMock));
+}
+
+TEST_F(AudioOutputImplementationTest, Configure_RegistersForHdmiCecSink)
+{
+    EXPECT_CALL(cecMock, Register(_)).Times(1);
+    ConfigureWithCec();
+}
+
+TEST_F(AudioOutputImplementationTest, Destructor_UnregistersAllListeners)
+{
+    ConfigureWithCec();
+
+    EXPECT_CALL(cecMock, Unregister(_)).Times(1);
+    EXPECT_CALL(hostImplMock, UnRegister(testing::A<device::Host::IAudioOutputPortEvents*>())).Times(1);
+    EXPECT_CALL(hostImplMock, UnRegister(testing::A<device::Host::IHdmiInEvents*>())).Times(1);
+    impl = Core::ProxyType<Plugin::AudioOutputImplementation>();
 }
 
 TEST_F(AudioOutputImplementationTest, InterfaceMap_QueryInterface_AudioOutput)
@@ -548,6 +800,10 @@ TEST(AudioOutputConstructorTests, ManagerInitializeThrows_ContinuesGracefully)
     device::AudioOutputPort port;
     ON_CALL(hostMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(port));
 
+    // Initialize threw, so no DS listeners are registered.
+    EXPECT_CALL(hostMock, Register(testing::A<device::Host::IAudioOutputPortEvents*>())).Times(0);
+    EXPECT_CALL(hostMock, Register(testing::A<device::Host::IHdmiInEvents*>())).Times(0);
+
     {
         auto implLocal = Core::ProxyType<Plugin::AudioOutputImplementation>::Create();
         bool enabled = true;
@@ -580,6 +836,10 @@ TEST(AudioOutputDestructorTests, ManagerDeInitializeThrows_CatchBlockHit)
         .WillByDefault(Return(device::List<device::AudioOutputPort>{}));
     device::AudioOutputPort port;
     ON_CALL(hostMock, getAudioOutputPort(_)).WillByDefault(ReturnRef(port));
+
+    // Listeners are unregistered before DeInitialize throws.
+    EXPECT_CALL(hostMock, UnRegister(testing::A<device::Host::IAudioOutputPortEvents*>())).Times(1);
+    EXPECT_CALL(hostMock, UnRegister(testing::A<device::Host::IHdmiInEvents*>())).Times(1);
 
     {
         auto implLocal = Core::ProxyType<Plugin::AudioOutputImplementation>::Create();

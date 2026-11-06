@@ -23,6 +23,7 @@
 #include <interfaces/Ids.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IConfiguration.h>
+#include <interfaces/IHdmiCecSink.h>
 
 #include <com/com.h>
 #include <core/core.h>
@@ -61,11 +62,101 @@ namespace Plugin {
         uint32_t Configure(PluginHost::IShell* service) override;
 
     private:
-        enum Event {
-            EV_ATMOS_EXP_CHANGED = 0
+        class DsAudioPortNotification : public device::Host::IAudioOutputPortEvents {
+        private:
+            DsAudioPortNotification(const DsAudioPortNotification&) = delete;
+            DsAudioPortNotification& operator=(const DsAudioPortNotification&) = delete;
+
+        public:
+            explicit DsAudioPortNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~DsAudioPortNotification() override = default;
+
+        public:
+            void OnDolbyAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status) override
+            {
+                _parent.dispatchEvent(EV_ATMOS_CAPABILITY_CHANGE,
+                    ParamsType{ static_cast<int32_t>(atmosCapability), static_cast<int32_t>(status) });
+            }
+
+            // Stubs for other IAudioOutputPortEvents methods
+            void OnAudioOutHotPlug(dsAudioPortType_t, uint32_t, bool) override {}
+            void OnAudioFormatUpdate(dsAudioFormat_t) override {}
+            void OnAudioPortStateChanged(dsAudioPortState_t) override {}
+            void OnAssociatedAudioMixingChanged(bool) override {}
+            void OnAudioFaderControlChanged(int) override {}
+            void OnAudioPrimaryLanguageChanged(const std::string&) override {}
+            void OnAudioSecondaryLanguageChanged(const std::string&) override {}
+            void OnAudioModeEvent(dsAudioPortType_t type, dsAudioStereoMode_t smode) override
+            {
+                _parent.dispatchEvent(EV_AUDIOMODE_CHANGE,
+                    ParamsType{ static_cast<int32_t>(type), static_cast<int32_t>(smode) });
+            }
+
+        private:
+            AudioOutputImplementation& _parent;
         };
 
-        // Event payload: first = new dolbyAtmosExperience value; second unused.
+        // DS HDMI-In event listener — a hot plug (e.g. ARC device) triggers a re-evaluation of the Atmos experience.
+        class DsHdmiInNotification : public device::Host::IHdmiInEvents {
+        private:
+            DsHdmiInNotification(const DsHdmiInNotification&) = delete;
+            DsHdmiInNotification& operator=(const DsHdmiInNotification&) = delete;
+
+        public:
+            explicit DsHdmiInNotification(AudioOutputImplementation& parent)
+                : _parent(parent)
+            {
+            }
+            ~DsHdmiInNotification() override = default;
+
+            void OnHdmiInEventHotPlug(dsHdmiInPort_t port, bool isConnected) override
+            {
+                _parent.OnHdmiInEventHotPlug(static_cast<int>(port), isConnected);
+            }
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
+
+        class HdmiCecSinkNotification : public Exchange::IHdmiCecSink::INotification {
+        private:
+            HdmiCecSinkNotification(const HdmiCecSinkNotification&) = delete;
+            HdmiCecSinkNotification& operator=(const HdmiCecSinkNotification&) = delete;
+
+        public:
+            explicit HdmiCecSinkNotification(AudioOutputImplementation* parent)
+                : _parent(*parent)
+            {
+                ASSERT(parent != nullptr);
+            }
+            ~HdmiCecSinkNotification() override = default;
+
+            BEGIN_INTERFACE_MAP(HdmiCecSinkNotification)
+            INTERFACE_ENTRY(Exchange::IHdmiCecSink::INotification)
+            END_INTERFACE_MAP
+
+            void ReportAudioDevicePowerStatus(const int powerStatus) override
+            {
+                _parent.ReportAudioDevicePowerStatus(powerStatus);
+            }
+
+        private:
+            AudioOutputImplementation& _parent;
+        };
+
+    private:
+        enum Event {
+            EV_AUDIOMODE_CHANGE = 0,
+            EV_ATMOS_CAPABILITY_CHANGE,
+            EV_REEVALUATE_ATMOS,
+            EV_ATMOS_EXP_CHANGED
+        };
+
+        // Event payload: (port type, stereo mode), (atmos capability, status) or (new dolbyAtmosExperience, unused);
+        // unused for EV_REEVALUATE_ATMOS.
         struct ParamsType {
             int32_t first;
             int32_t second;
@@ -114,6 +205,14 @@ namespace Plugin {
         bool EvaluateCurrentAtmosExperience(Exchange::IAudioOutput::AudioModes mode, bool cap) const;
 
         void SendNotify(bool dolbyAtmosExperience);
+        void NotifyIfAtmosExperienceChanged(Exchange::IAudioOutput::AudioModes mode, bool cap);
+        void registerDsEventHandlers();
+        void unregisterDsEventHandlers();
+        void onAudioModeChanged(dsAudioPortType_t type, dsAudioStereoMode_t smode);
+        void onAtmosCapabilitiesChanged(dsATMOSCapability_t atmosCapability, bool status);
+        void ReevaluateAtmosExperience();
+        void OnHdmiInEventHotPlug(int port, bool isConnected);
+        void ReportAudioDevicePowerStatus(const int powerStatus);
         void Dispatch(Event ev, const ParamsType& params);
         void dispatchEvent(Event ev, const ParamsType& params);
 
@@ -125,6 +224,18 @@ namespace Plugin {
 
         // Observer list
         std::list<Exchange::IAudioOutput::INotification*> _observers;
+
+        // DS HAL event listener
+        DsAudioPortNotification _dsAudioPortNotification{*this};
+        DsHdmiInNotification _dsHdmiInNotification{*this};
+        bool _registeredDsEventHandlers{false};
+
+        // Only the first ReportAudioDevicePowerStatus after boot triggers a re-evaluation; later reports are frequent.
+        std::atomic<bool> _externalArcEnabled{false};
+
+        // HdmiCecSink (optional) and its notification
+        Exchange::IHdmiCecSink* _hdmiCecSink{nullptr};
+        Core::Sink<HdmiCecSinkNotification> _hdmiCecSinkNotification;
     };
 
 } // namespace Plugin

@@ -91,13 +91,19 @@ private:
 // ---------------------------------------------------------------------------
 // L2 Test base fixture
 //
-// The plugin keeps no cache: every DolbyAtmosExperience() call queries the
-// DS HAL mocks. Tests therefore drive state by changing the mock return
-// values (SetAtmosCapability / SetSoundMode) and then calling the getter.
-// A notification is dispatched when the getter observes a changed value.
+// The plugin keeps no cache: DolbyAtmosExperience() queries the DS HAL mocks on
+// every call and never notifies. Notifications come from the DS audio events,
+// HDMI-In hot plug and CEC power status, which re-query the HAL and notify only
+// when the derived value changes. Tests drive state by changing the mock return
+// values (SetAtmosCapability / SetSoundMode) and firing the captured listeners.
+// The CEC path needs an HdmiCecSink plugin and is covered by the L1 tests.
 // ---------------------------------------------------------------------------
 class AudioOutputL2Test : public L2TestMocks {
 protected:
+    // Listeners the plugin registers during construction; captured by the Host::Register ON_CALLs.
+    device::Host::IAudioOutputPortEvents* dsListener{nullptr};
+    device::Host::IHdmiInEvents*          hdmiListener{nullptr};
+
     // Persistent object returned by getAudioOutputPort(); calls delegate to p_audioOutputPortMock.
     device::AudioOutputPort _audioPortObj;
     // Persistent object whose getId() delegates to p_audioOutputPortTypeMock.
@@ -147,8 +153,26 @@ protected:
         return value;
     }
 
-    // Lets any notification dispatched by a previous Query() reach its observers.
+    // Lets any notification dispatched by a previous event reach its observers.
     static void Settle() { usleep(300000); }
+
+    void FireAudioMode(int portType, dsAudioStereoMode_t smode)
+    {
+        ASSERT_NE(dsListener, nullptr);
+        dsListener->OnAudioModeEvent(static_cast<dsAudioPortType_t>(portType), smode);
+    }
+
+    void FireAtmosCapability(dsATMOSCapability_t cap)
+    {
+        ASSERT_NE(dsListener, nullptr);
+        dsListener->OnDolbyAtmosCapabilitiesChanged(cap, true);
+    }
+
+    void FireHdmiHotPlug(bool connected)
+    {
+        ASSERT_NE(hdmiListener, nullptr);
+        hdmiListener->OnHdmiInEventHotPlug(dsHDMI_IN_PORT_0, connected);
+    }
 
 private:
     std::string _portName;
@@ -174,10 +198,19 @@ AudioOutputL2Test::AudioOutputL2Test()
     ON_CALL(*p_audioOutputPortMock, isConnected())
         .WillByDefault(Return(false));
 
+    // Capture the listeners the plugin registers while it is activated below.
+    ON_CALL(*p_hostImplMock, Register(A<device::Host::IAudioOutputPortEvents*>()))
+        .WillByDefault(DoAll(SaveArg<0>(&dsListener), Return(dsERR_NONE)));
+    ON_CALL(*p_hostImplMock, Register(A<device::Host::IHdmiInEvents*>()))
+        .WillByDefault(DoAll(SaveArg<0>(&hdmiListener), Return(dsERR_NONE)));
+
     uint32_t status = ActivateService(AUDIOOUTPUT_CALLSIGN);
     if (status != Core::ERROR_NONE) {
         TEST_LOG("Failed to activate AudioOutput plugin: %u", status);
     }
+
+    EXPECT_NE(dsListener, nullptr) << "Plugin did not register for IAudioOutputPortEvents";
+    EXPECT_NE(hdmiListener, nullptr) << "Plugin did not register for IHdmiInEvents";
 }
 
 AudioOutputL2Test::~AudioOutputL2Test()
@@ -315,21 +348,18 @@ TEST_F(AudioOutputL2Test, ComRpc_SoundModePortTypes)
 }
 
 // ===========================================================================
-//  Notifications
+//  Notifications — event-driven; the getter never notifies
 // ===========================================================================
 
 TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredWithTrue_OnFalseToTrueTransition)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
-    SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
-    ASSERT_FALSE(Query());
-
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
 
     EXPECT_TRUE(sink->WaitForNotification(2000)) << "Notification must fire on false->true";
     EXPECT_TRUE(sink->LastValue());
@@ -342,14 +372,14 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredWithFalse_OnTrue
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
-    ASSERT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
     Settle();
 
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
-    EXPECT_FALSE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
 
     EXPECT_TRUE(sink->WaitForNotification(2000)) << "Notification must fire on true->false";
     EXPECT_FALSE(sink->LastValue());
@@ -361,14 +391,11 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_NotFired_WhenValueSta
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
-    SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
-    ASSERT_FALSE(Query());
-
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_MONO);
-    EXPECT_FALSE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_MONO);
 
     EXPECT_FALSE(sink->WaitForNotification(500));
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -379,14 +406,14 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_NotFired_WhenValueSta
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
-    ASSERT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
     Settle();
 
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_DDPLUS);
-    EXPECT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_DDPLUS);
 
     EXPECT_FALSE(sink->WaitForNotification(500));
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -396,17 +423,44 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_NotFired_AfterUnregis
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
-    SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
-    ASSERT_FALSE(Query());
-
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
     mAudioOutputPlugin->Unregister(&(*sink));
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
 
     EXPECT_FALSE(sink->WaitForNotification(500));
+}
+
+// Event for ARC while only the speaker is connected must be ignored.
+TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_AudioModeEvent_PortTypeNotConnected_Ignored)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    mAudioOutputPlugin->Register(&(*sink));
+
+    SetSoundMode(device::AudioOutputPortType::kSPEAKER, dsAUDIO_STEREO_PASSTHRU, false, "SPEAKER0");
+    FireAudioMode(device::AudioOutputPortType::kARC, dsAUDIO_STEREO_DDPLUS);
+
+    EXPECT_FALSE(sink->WaitForNotification(500));
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_AudioModeEvent_GetPortsThrows_Ignored)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    mAudioOutputPlugin->Register(&(*sink));
+
+    ON_CALL(*p_hostImplMock, getAudioOutputPorts())
+        .WillByDefault(Throw(device::Exception("Ports unavailable")));
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
+
+    EXPECT_FALSE(sink->WaitForNotification(500));
+    mAudioOutputPlugin->Unregister(&(*sink));
 }
 
 TEST_F(AudioOutputL2Test, ComRpc_Notification_FiredTrue_WhenAtmosCapabilityBecomesSupported)
@@ -414,13 +468,11 @@ TEST_F(AudioOutputL2Test, ComRpc_Notification_FiredTrue_WhenAtmosCapabilityBecom
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
-    ASSERT_FALSE(Query()) << "Pre-condition: NOT_SUPPORTED gates the result";
 
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
-    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
-    EXPECT_TRUE(Query());
+    FireAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
 
     EXPECT_TRUE(sink->WaitForNotification(2000));
     EXPECT_TRUE(sink->LastValue());
@@ -433,14 +485,13 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Notification_FiredFalse_WhenAtmosC
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
-    ASSERT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
     Settle();
 
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
-    SetAtmosCapability(dsAUDIO_ATMOS_NOTSUPPORTED);
-    EXPECT_FALSE(Query());
+    FireAtmosCapability(dsAUDIO_ATMOS_NOTSUPPORTED);
 
     EXPECT_TRUE(sink->WaitForNotification(2000));
     EXPECT_FALSE(sink->LastValue());
@@ -453,13 +504,75 @@ TEST_F(AudioOutputL2Test, ComRpc_Notification_NotFired_WhenCapabilityChangesButR
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
-    ASSERT_FALSE(Query());
 
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     mAudioOutputPlugin->Register(&(*sink));
 
-    SetAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
-    EXPECT_FALSE(Query()) << "STEREO is non-enabling";
+    FireAtmosCapability(dsAUDIO_ATMOS_ATMOSMETADATA);
+
+    EXPECT_FALSE(sink->WaitForNotification(500)) << "STEREO is non-enabling";
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+// ===========================================================================
+//  HDMI-In hot plug re-evaluates the Atmos experience
+// ===========================================================================
+
+TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_HdmiHotPlug_ReevaluatesAndNotifies)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    mAudioOutputPlugin->Register(&(*sink));
+
+    SetSoundMode(device::AudioOutputPortType::kARC, dsAUDIO_STEREO_DDPLUS, false, "HDMI_ARC0");
+    FireHdmiHotPlug(true);
+
+    EXPECT_TRUE(sink->WaitForNotification(2000));
+    EXPECT_TRUE(sink->LastValue());
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_HdmiHotPlug_ValueUnchanged_NoNotification)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    mAudioOutputPlugin->Register(&(*sink));
+
+    FireHdmiHotPlug(false);
+
+    EXPECT_FALSE(sink->WaitForNotification(500));
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_HdmiHotPlug_HalFails_Ignored)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    mAudioOutputPlugin->Register(&(*sink));
+
+    SetSoundMode(device::AudioOutputPortType::kARC, dsAUDIO_STEREO_DDPLUS, false, "HDMI_ARC0");
+    ON_CALL(*p_hostImplMock, getAudioOutputPort(::testing::_))
+        .WillByDefault(Throw(device::Exception("Simulated HAL failure")));
+    FireHdmiHotPlug(true);
+
+    EXPECT_FALSE(sink->WaitForNotification(500));
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Getter_NeverNotifies)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    mAudioOutputPlugin->Register(&(*sink));
+
+    SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
+    EXPECT_TRUE(Query());
+    EXPECT_TRUE(Query());
 
     EXPECT_FALSE(sink->WaitForNotification(500));
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -489,14 +602,13 @@ TEST_F(AudioOutputL2Test_AtmosCapable, ComRpc_Register_Duplicate_NotificationDel
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_STEREO);
-    ASSERT_FALSE(Query());
 
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
 
     SetSoundMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
-    EXPECT_TRUE(Query());
+    FireAudioMode(device::AudioOutputPortType::kHDMI, dsAUDIO_STEREO_PASSTHRU);
 
     EXPECT_TRUE(sink->WaitForNotification(2000));
     mAudioOutputPlugin->Unregister(&(*sink));
