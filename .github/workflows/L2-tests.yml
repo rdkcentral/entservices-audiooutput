@@ -158,7 +158,7 @@ jobs:
         with:
           repository: rdkcentral/entservices-devicesettings
           path: entservices-devicesettings
-          ref: topic/RDKEMW-25013    
+          ref: topic/RDKEMW-23172_Fixes   
 
       - name: Checkout entservices-audiooutput
         if: ${{ inputs.caller_source == 'local' }}
