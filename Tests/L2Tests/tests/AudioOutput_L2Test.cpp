@@ -287,6 +287,8 @@ void AudioOutputL2Test::ConfigureDeviceSettingsMocks()
 
     mDsAudioHalMock = new ::testing::NiceMock<DsAudioHalMock>();
     mDsHdmiInHalMock = new ::testing::NiceMock<DsHdmiInHalMock>();
+    ::testing::Mock::AllowLeak(mDsAudioHalMock);
+    ::testing::Mock::AllowLeak(mDsHdmiInHalMock);
 
     // HDMI-In: capture the connect callback so tests can inject hot plug events
     ON_CALL(*mDsHdmiInHalMock, dsHdmiInInit()).WillByDefault(Return(dsERR_NONE));
