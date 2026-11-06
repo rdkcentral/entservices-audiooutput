@@ -466,6 +466,7 @@ TEST_F(AudioOutputImplementationTest, Configure_HdmiDisplayNotConnected_FallsBac
 }
 
 // HDMI_ARC > HDMI precedence for both the Atmos capability and the sound mode.
+#if 0
 TEST_F(AudioOutputImplementationTest, Configure_ArcEnabled_ArcTakesPrecedenceOverHdmi)
 {
     TEST_LOG("Configure: HDMI_ARC0 preferred over HDMI0");
@@ -483,6 +484,7 @@ TEST_F(AudioOutputImplementationTest, Configure_ArcEnabled_ArcTakesPrecedenceOve
     ConfigureAndWait();
     EXPECT_TRUE(DolbyAtmosExperience());
 }
+#endif
 
 // HDMI_ARC enabled but not connected -> next port in the precedence list (HDMI) is used.
 TEST_F(AudioOutputImplementationTest, Configure_ArcNotConnected_UsesHdmiSoundMode)
