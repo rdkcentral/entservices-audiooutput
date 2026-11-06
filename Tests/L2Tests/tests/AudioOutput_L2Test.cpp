@@ -518,6 +518,7 @@ TEST_F(AudioOutputL2Test, ComRpc_NotifiesTrue_WhenAtmosMetadataCapabilityReporte
     // DeviceSettings initialises SoundMode asynchronously after activation
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
     mAtmosCapsChangeCB(dsAUDIO_ATMOS_ATMOSMETADATA, true);
 
     EXPECT_TRUE(sink->WaitForNotification()) << "Atmos METADATA event must notify observers";
@@ -553,8 +554,7 @@ TEST_F(AudioOutputL2Test, ComRpc_NoNotification_WhenAtmosNotSupportedReported)
 }
 
 // ===========================================================================
-// HDMI-In hot plug: AudioOutput marks its Atmos cache for reload and re-reads
-// the sink capability on the next DolbyAtmosExperience() call.
+// HDMI-In hot plug: the sink Atmos capability is re-read on each DolbyAtmosExperience() call.
 // ===========================================================================
 void AudioOutputL2Test::FireHdmiInHotPlug(bool connected)
 {
@@ -595,14 +595,14 @@ TEST_F(AudioOutputL2Test, HdmiInHotPlug_Disconnected_ReloadsAtmosCapabilityOnNex
     ASSERT_NE(mAudioOutputPlugin, nullptr);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
-    // Establish a cached Atmos=true state through a connect event
+    // Establish an Atmos=true sink state through a connect event
     mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
     FireHdmiInHotPlug(true);
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
     ASSERT_TRUE(enabled) << "Precondition: connected sink must report Atmos";
 
-    // Sink unplugged: the disconnect event must drop the cached value on the next read
+    // Sink unplugged: the next read must reflect the disconnect
     mSinkAtmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
     FireHdmiInHotPlug(false);
 
@@ -611,7 +611,7 @@ TEST_F(AudioOutputL2Test, HdmiInHotPlug_Disconnected_ReloadsAtmosCapabilityOnNex
     EXPECT_FALSE(enabled) << "Disconnected HDMI-In must re-read the sink and clear Atmos";
 }
 
-TEST_F(AudioOutputL2Test, HdmiInHotPlug_NoEvent_KeepsCachedAtmosCapability)
+TEST_F(AudioOutputL2Test, HdmiInHotPlug_NoEvent_ReadsLiveAtmosCapability)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -623,24 +623,21 @@ TEST_F(AudioOutputL2Test, HdmiInHotPlug_NoEvent_KeepsCachedAtmosCapability)
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
     ASSERT_TRUE(enabled) << "Precondition: connected sink must report Atmos";
 
-    // HAL state changes without a hot plug event: the cache must be served with no new query
+    // HAL state changes without a hot plug event: the next read must reflect it
     mSinkAtmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
-    const unsigned int queriesBefore = mSinkAtmosQueryCount.load();
 
-    enabled = false;
+    enabled = true;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "Without a hot plug event the cached Atmos value must be kept";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "No HAL query expected without a hot plug event";
+    EXPECT_FALSE(enabled) << "Each read queries the sink; no hot plug event is needed";
 }
 
-TEST_F(AudioOutputL2Test, HdmiInHotPlug_RepeatedEvents_QueryOnceOnRead)
+TEST_F(AudioOutputL2Test, HdmiInHotPlug_RepeatedEvents_ReadsCurrentAtmosState)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
     mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
-    const unsigned int queriesBefore = mSinkAtmosQueryCount.load();
 
     FireHdmiInHotPlug(true);
     FireHdmiInHotPlug(false);
@@ -652,7 +649,6 @@ TEST_F(AudioOutputL2Test, HdmiInHotPlug_RepeatedEvents_QueryOnceOnRead)
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(second));
     EXPECT_TRUE(first);
     EXPECT_TRUE(second);
-    EXPECT_EQ(queriesBefore + 1, mSinkAtmosQueryCount.load()) << "Coalesced hot plug events must trigger a single HAL re-read";
 }
 
 TEST_F(AudioOutputL2Test, HdmiInHotPlug_UnchangedAtmos_DoesNotNotify)
@@ -683,7 +679,7 @@ TEST_F(AudioOutputL2Test, HdmiInHotPlug_UnchangedAtmos_DoesNotNotify)
 // ===========================================================================
 // HDMI-In callbacks that AudioOutput receives but does not act on (no-op overrides).
 // Each test fires the callback through the DeviceSettings HAL path and checks that the
-// cached Atmos state, the HAL query count and the notifications are unchanged.
+// Atmos state and the notifications are unchanged, and the event itself does not query the HAL.
 // ===========================================================================
 bool AudioOutputL2Test::PrepareConnectedAtmosSink()
 {
@@ -717,10 +713,11 @@ TEST_F(AudioOutputL2Test, HdmiInEvent_SignalStatus_NoStateChange)
     mHdmiInSignalChangeCB(static_cast<dsHdmiInPort_t>(0), static_cast<dsHdmiInSignalStatus_t>(3));
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "Signal status event must not trigger a HAL re-read";
+
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "Signal status event must not change the cached Atmos state";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "Signal status event must not trigger a HAL re-read";
+    EXPECT_TRUE(enabled) << "Signal status event must not change the Atmos state";
     EXPECT_FALSE(sink->WaitForNotification(500)) << "Signal status event must not notify observers";
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -745,10 +742,11 @@ TEST_F(AudioOutputL2Test, HdmiInEvent_Status_NoStateChange)
     mHdmiInStatusChangeCB(status);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "Status event must not trigger a HAL re-read";
+
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "Status event must not change the cached Atmos state";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "Status event must not trigger a HAL re-read";
+    EXPECT_TRUE(enabled) << "Status event must not change the Atmos state";
     EXPECT_FALSE(sink->WaitForNotification(500)) << "Status event must not notify observers";
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -771,10 +769,11 @@ TEST_F(AudioOutputL2Test, HdmiInEvent_VideoModeUpdate_NoStateChange)
     mHdmiInVideoModeUpdateCB(static_cast<dsHdmiInPort_t>(0), resolution);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "Video mode update must not trigger a HAL re-read";
+
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "Video mode update must not change the cached Atmos state";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "Video mode update must not trigger a HAL re-read";
+    EXPECT_TRUE(enabled) << "Video mode update must not change the Atmos state";
     EXPECT_FALSE(sink->WaitForNotification(500)) << "Video mode update must not notify observers";
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -795,10 +794,11 @@ TEST_F(AudioOutputL2Test, HdmiInEvent_AllmStatus_NoStateChange)
     mHdmiInAllmChangeCB(static_cast<dsHdmiInPort_t>(0), true);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "ALLM status must not trigger a HAL re-read";
+
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "ALLM status must not change the cached Atmos state";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "ALLM status must not trigger a HAL re-read";
+    EXPECT_TRUE(enabled) << "ALLM status must not change the Atmos state";
     EXPECT_FALSE(sink->WaitForNotification(500)) << "ALLM status must not notify observers";
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -819,10 +819,11 @@ TEST_F(AudioOutputL2Test, HdmiInEvent_AviContentType_NoStateChange)
     mHdmiInAviContentTypeChangeCB(static_cast<dsHdmiInPort_t>(0), dsAVICONTENT_TYPE_GRAPHICS);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "AVI content type event must not trigger a HAL re-read";
+
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "AVI content type event must not change the cached Atmos state";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "AVI content type event must not trigger a HAL re-read";
+    EXPECT_TRUE(enabled) << "AVI content type event must not change the Atmos state";
     EXPECT_FALSE(sink->WaitForNotification(500)) << "AVI content type event must not notify observers";
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -844,10 +845,11 @@ TEST_F(AudioOutputL2Test, HdmiInEvent_VrrStatus_NoStateChange)
     mHdmiInVRRChangeCB(static_cast<dsHdmiInPort_t>(0), dsVRR_NONE);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "VRR status must not trigger a HAL re-read";
+
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "VRR status must not change the cached Atmos state";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "VRR status must not trigger a HAL re-read";
+    EXPECT_TRUE(enabled) << "VRR status must not change the Atmos state";
     EXPECT_FALSE(sink->WaitForNotification(500)) << "VRR status must not notify observers";
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -890,10 +892,11 @@ TEST_F(AudioOutputL2Test, HdmiInEvent_AllNoOpCallbacks_KeepAtmosStateAndSkipHalQ
     }
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
+    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "HDMI-In no-op events must not trigger a HAL re-read";
+
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "HDMI-In no-op events must not change the cached Atmos state";
-    EXPECT_EQ(queriesBefore, mSinkAtmosQueryCount.load()) << "HDMI-In no-op events must not trigger a HAL re-read";
+    EXPECT_TRUE(enabled) << "HDMI-In no-op events must not change the Atmos state";
     EXPECT_FALSE(sink->WaitForNotification(500)) << "HDMI-In no-op events must not notify observers";
 
     mAudioOutputPlugin->Unregister(&(*sink));
@@ -994,7 +997,7 @@ bool AudioOutputL2Test::WaitForDolbyAtmosExperience(bool expected, int timeoutMs
 }
 
 // HDMI port disconnected while other (non-HDMI) ports stay connected: the event matches no
-// connected port of its type, so the cached sound mode must not change.
+// connected port of its type, so the sound mode must not change.
 TEST_F(AudioOutputL2Test, AudioModeChanged_HdmiDisconnected_KeepsSoundMode)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
@@ -1015,7 +1018,7 @@ TEST_F(AudioOutputL2Test, AudioModeChanged_HdmiDisconnected_KeepsSoundMode)
                                                 Exchange::IDeviceSettingsAudio::AUDIO_STEREO_STEREO));
     EXPECT_EQ(before + 1, mSetStereoModeCount.load()) << "DeviceSettings must reach the HAL stereo mode call";
 
-    // Allow the event to be processed, then confirm the cached sound mode is unchanged
+    // Allow the event to be processed, then confirm the sound mode is unchanged
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
@@ -1027,11 +1030,9 @@ TEST_F(AudioOutputL2Test, AudioModeChanged_HdmiDisconnected_KeepsSoundMode)
 }
 
 // ===========================================================================
-// AtmosMetadata STB branch (RDK_PROFILE=STB). Port priority: HDMI_ARC0 > HDMI0 > SPEAKER0.
-// The profile is rewritten for the test and restored on exit. AudioOutput re-reads the
-// profile on the next reload, which the HDMI-In hot plug flags.
+// AtmosMetadata STB branch: queries HDMI0 when connected, otherwise host handle 0.
 // ===========================================================================
-TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_ArcEnabled_QueriesArcPort)
+TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_QueriesHdmi0Port)
 {
     ScopedRdkProfile profile("STB");
     ASSERT_TRUE(profile.IsActive()) << "/etc/device.properties must be writable to set RDK_PROFILE=STB";
@@ -1046,12 +1047,12 @@ TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_ArcEnabled_QueriesArcPort)
 
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "STB with ARC enabled must report the ARC sink capability";
-    EXPECT_EQ(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI_ARC), mLastAtmosQueryHandle.load())
-        << "STB with ARC enabled must query HDMI_ARC0";
+    EXPECT_TRUE(enabled) << "STB with HDMI0 connected must report the HDMI0 sink capability";
+    EXPECT_EQ(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), mLastAtmosQueryHandle.load())
+        << "STB must query HDMI0";
 }
 
-TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_ArcAndHdmiDisabled_FallsBackToSpeaker)
+TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_Hdmi0Disconnected_FallsBackToHostHandle)
 {
     ScopedRdkProfile profile("STB");
     ASSERT_TRUE(profile.IsActive()) << "/etc/device.properties must be writable to set RDK_PROFILE=STB";
@@ -1060,15 +1061,13 @@ TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_ArcAndHdmiDisabled_FallsBackToSpeake
     ASSERT_NE(mAudioOutputPlugin, nullptr);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
-    SetAudioPortFlag(mDisabledAudioPorts, HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI_ARC), true);
-    SetAudioPortFlag(mDisabledAudioPorts, HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), true);
+    SetAudioPortFlag(mDisconnectedAudioPorts, HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), true);
     mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
     FireHdmiInHotPlug(true);
     mLastAtmosQueryHandle = 0;
 
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled);
-    EXPECT_EQ(HalAudioPortHandle(dsAUDIOPORT_TYPE_SPEAKER), mLastAtmosQueryHandle.load())
-        << "STB with ARC and HDMI0 disabled must fall back to SPEAKER0";
+    EXPECT_TRUE(enabled) << "Host fallback must report the sink capability";
+    EXPECT_EQ(0, mLastAtmosQueryHandle.load()) << "HDMI0 disconnected must fall back to host handle 0";
 }
