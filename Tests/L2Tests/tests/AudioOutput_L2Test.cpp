@@ -989,9 +989,9 @@ bool AudioOutputL2Test::WaitForDolbyAtmosExperience(bool expected, int timeoutMs
     }
 }
 
-// HEADPHONE0 disconnected: a stereo mode event for it matches no connected port of its type,
-// so observers must not be notified. The HDMI path still drives the Atmos result.
-TEST_F(AudioOutputL2Test, AudioModeChanged_DisconnectedPortEvent_DoesNotNotify)
+// A stereo mode change is reported by DeviceSettings for the always-connected SPEAKER0, so the
+// event matches a connected port and the re-evaluated Atmos value (STEREO, no passthrough) is notified.
+TEST_F(AudioOutputL2Test, AudioModeChanged_StereoEvent_NotifiesAtmosChange)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1005,29 +1005,22 @@ TEST_F(AudioOutputL2Test, AudioModeChanged_DisconnectedPortEvent_DoesNotNotify)
     auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
 
-    int32_t headphoneHandle = 0;
-    ASSERT_EQ(Core::ERROR_NONE, GetDsAudioPort(Exchange::IDeviceSettingsAudio::AUDIO_PORT_TYPE_HEADPHONE, headphoneHandle));
-    SetAudioPortFlag(mDisconnectedAudioPorts, static_cast<intptr_t>(headphoneHandle), true);
-
     const unsigned int before = mSetStereoModeCount.load();
-    EXPECT_EQ(Core::ERROR_NONE, SetDsStereoMode(Exchange::IDeviceSettingsAudio::AUDIO_PORT_TYPE_HEADPHONE,
+    EXPECT_EQ(Core::ERROR_NONE, SetDsStereoMode(Exchange::IDeviceSettingsAudio::AUDIO_PORT_TYPE_SPEAKER,
                                                 Exchange::IDeviceSettingsAudio::AUDIO_STEREO_STEREO));
     EXPECT_EQ(before + 1, mSetStereoModeCount.load()) << "DeviceSettings must reach the HAL stereo mode call";
 
-    EXPECT_FALSE(sink->WaitForNotification(500)) << "Mode event for a disconnected port must not notify observers";
-    bool enabled = false;
-    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "The HDMI path still drives the Atmos result";
+    EXPECT_TRUE(sink->WaitForNotification(2000)) << "Stereo mode event on a connected port must notify the Atmos change";
 
-    SetAudioPortFlag(mDisconnectedAudioPorts, static_cast<intptr_t>(headphoneHandle), false);
     mAudioOutputPlugin->Unregister(&(*sink));
 }
 
 // ===========================================================================
-// AtmosMetadata STB branch (RDK_PROFILE=STB): the capability is read from HDMI0 while the
-// HDMI display is connected. The profile is rewritten for the test and restored on exit.
+// AtmosMetadata STB branch (RDK_PROFILE=STB). The fixture's DeviceSettings config has no HDMI0
+// audio port, so HDMI0 is never connected and the capability is read from the host handle.
+// The profile is rewritten for the test and restored on exit.
 // ===========================================================================
-TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_HdmiConnected_QueriesHdmiPort)
+TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_HdmiPortAbsent_QueriesHostHandle)
 {
     ScopedRdkProfile profile("STB");
     ASSERT_TRUE(profile.IsActive()) << "/etc/device.properties must be writable to set RDK_PROFILE=STB";
@@ -1037,12 +1030,14 @@ TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_HdmiConnected_QueriesHdmiPort)
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
     mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    mSinkAtmosQueryCount = 0;
     mLastAtmosQueryHandle = 0;
 
     bool enabled = false;
     EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->DolbyAtmosExperience(enabled));
-    EXPECT_TRUE(enabled) << "STB with HDMI connected must report the HDMI0 sink capability";
-    EXPECT_EQ(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), mLastAtmosQueryHandle.load())
-        << "STB with HDMI connected must query HDMI0";
+    EXPECT_TRUE(enabled) << "STB must report the sink capability read from the host handle";
+    EXPECT_GT(mSinkAtmosQueryCount.load(), 0u) << "STB must query the sink Atmos capability";
+    EXPECT_NE(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), mLastAtmosQueryHandle.load())
+        << "HDMI0 is absent from the DeviceSettings config, so it must not be queried";
 }
 

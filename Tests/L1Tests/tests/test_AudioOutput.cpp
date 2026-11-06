@@ -472,11 +472,13 @@ TEST_F(AudioOutputImplementationTest, Configure_HdmiDisplayNotConnected_UsesHost
     SetHdmiDisplayConnected(false);
     SetPortEnabled(kHdmiHandle, true);
     SetPortEnabled(kSpeakerHandle, true);
-    SetAtmosCapability(0, Audio::AUDIO_DOLBY_ATMOS_METADATA);
     SetStereoMode(kHdmiHandle, Audio::AUDIO_STEREO_MONO);
     SetStereoMode(kSpeakerHandle, Audio::AUDIO_STEREO_PASSTHROUGH);
 
+    // An EXPECT_CALL replaces the ON_CALL default for every argument, so the host handle is stubbed here.
     EXPECT_CALL(*audioMock, GetAudioSinkDeviceAtmosCapability(kHdmiHandle, _)).Times(0);
+    EXPECT_CALL(*audioMock, GetAudioSinkDeviceAtmosCapability(0, _))
+        .WillRepeatedly(DoAll(SetArgReferee<1>(Audio::AUDIO_DOLBY_ATMOS_METADATA), Return(Core::ERROR_NONE)));
 
     ConfigureAndWait();
     EXPECT_TRUE(DolbyAtmosExperience()) << "Host capability with SPEAKER0 PASSTHROUGH must yield true";
@@ -975,6 +977,9 @@ TEST_F(AudioOutputImplementationTest, HdmiInHotPlug_Disconnected_NotifiesOnAtmos
     ConfigureAndWait();
     ASSERT_NE(hdmiInListener, nullptr);
     ASSERT_TRUE(DolbyAtmosExperience());
+
+    // Activation does not update the cached value, so a connect event establishes Atmos=true first.
+    FireHdmiInHotPlug(true);
 
     auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
     impl->Register(&(*notification));
