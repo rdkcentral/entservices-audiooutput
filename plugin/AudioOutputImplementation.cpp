@@ -46,6 +46,7 @@ namespace Plugin {
     // -------------------------------------------------------------------------
 
     AudioOutputImplementation::AudioOutputImplementation()
+        : _hdmiCecSinkNotification(this)
     {
         LOGINFO("AudioOutputImplementation Constructor");
 
@@ -62,6 +63,12 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation Destructor");
 
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Unregister(&_hdmiCecSinkNotification);
+            _hdmiCecSink->Release();
+            _hdmiCecSink = nullptr;
+        }
+
         try {
             unregisterDsEventHandlers();
             device::Manager::DeInitialize();
@@ -71,39 +78,17 @@ namespace Plugin {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Exchange::IConfiguration::Configure
-    // -------------------------------------------------------------------------
-
     uint32_t AudioOutputImplementation::Configure(PluginHost::IShell* service)
     {
         ASSERT(service != nullptr);
 
-        bool cap = false;
-        bool atmosMetadataFailed = false;
-
-        if (AtmosMetadata(cap) != Core::ERROR_NONE) {
-            LOGERR("Configure: failed to get atmos metadata");
-            atmosMetadataFailed = true;
+        _hdmiCecSink = service->QueryInterfaceByCallsign<Exchange::IHdmiCecSink>("org.rdk.HdmiCecSink");
+        if (_hdmiCecSink != nullptr) {
+            _hdmiCecSink->Register(&_hdmiCecSinkNotification);
+            LOGINFO("Configure: registered for HdmiCecSink ReportAudioDevicePowerStatus notification");
+        } else {
+            LOGWARN("Configure: HdmiCecSink not available, ReportAudioDevicePowerStatus will not be received");
         }
-
-        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
-        bool soundModeInitFailed = false;
-        if (SoundMode(mode) != Core::ERROR_NONE) {
-            LOGERR("Configure: failed to get sound mode");
-            soundModeInitFailed = true;
-        }
-
-        _atmosMetadataInitFailed = atmosMetadataFailed;
-        _soundModeInitFailed = soundModeInitFailed;
-
-        _adminLock.Lock();
-        _atmosMetaData = cap;
-        _soundMode = mode;
-        _adminLock.Unlock();
-        UpdateCache();
-        LOGINFO("AudioOutputImplementation::Configure: initial dolbyAtmosExperience=%s",
-                _dolbyAtmosExperience ? "true" : "false");
 
         return Core::ERROR_NONE;
     }
@@ -112,8 +97,9 @@ namespace Plugin {
     {
         if (!_registeredDsEventHandlers) {
             device::Host::getInstance().Register(&_dsAudioPortNotification, "WPE[AudioOutput]");
+            device::Host::getInstance().Register(&_dsHdmiInNotification, "WPE[AudioOutput]");
             _registeredDsEventHandlers = true;
-            LOGINFO("Registered for IAudioOutputPortEvents");
+            LOGINFO("Registered for IAudioOutputPortEvents and IHdmiInEvents");
         }
     }
 
@@ -121,31 +107,74 @@ namespace Plugin {
     {
         if (_registeredDsEventHandlers) {
             device::Host::getInstance().UnRegister(&_dsAudioPortNotification);
-			_registeredDsEventHandlers = false;
-            LOGINFO("Unregistered from IAudioOutputPortEvents");
+            device::Host::getInstance().UnRegister(&_dsHdmiInNotification);
+            _registeredDsEventHandlers = false;
+            LOGINFO("Unregistered from IAudioOutputPortEvents and IHdmiInEvents");
         }
     }
 
-    void AudioOutputImplementation::UpdateCache()
+    void AudioOutputImplementation::OnHdmiInEventHotPlug(int port, bool isConnected)
     {
-        _adminLock.Lock();
-        bool isAtmosExpChanged = false;
+        LOGINFO("Received OnHdmiInEventHotPlug callback, port: %d, isConnected: %s", port, isConnected ? "true" : "false");
+        dispatchEvent(EV_REEVALUATE_ATMOS, ParamsType{ 0, 0 });
+    }
 
-        bool newValue = EvaluateCurrentAtmosExperience();
-        if (newValue != _dolbyAtmosExperience) {
-            isAtmosExpChanged = true;
-            _dolbyAtmosExperience = newValue;
-        } else {
-            
-            LOGINFO("AudioOutputImplementation: dolbyAtmosExperience unchanged (%s)",
-                    _dolbyAtmosExperience ? "true" : "false");
+    void AudioOutputImplementation::ReportAudioDevicePowerStatus(const int powerStatus)
+    {
+        if (!_externalArcEnabled.exchange(true)) {
+            LOGINFO("AudioOutputImplementation::ReportAudioDevicePowerStatus: powerStatus=%d", powerStatus);
+            dispatchEvent(EV_REEVALUATE_ATMOS, ParamsType{ 0, 0 });
         }
+    }
+
+    // Queries both HAL values and notifies if the derived Atmos experience changed.
+    void AudioOutputImplementation::ReevaluateAtmosExperience()
+    {
+        bool cap = false;
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+
+        const bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
+        const bool soundErr = (SoundMode(mode) != Core::ERROR_NONE);
+        if (atmosErr || soundErr) {
+            LOGERR("ReevaluateAtmosExperience: failed (atmosMetadata=%s, soundMode=%s)",
+                   atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
+            return;
+        }
+        NotifyIfAtmosExperienceChanged(mode, cap);
+    }
+
+    void AudioOutputImplementation::dispatchEvent(Event ev, const ParamsType& params)
+    {
+        Core::IWorkerPool::Instance().Submit(DispatchJob::Create(this, ev, params));
+    }
+
+    void AudioOutputImplementation::Dispatch(Event ev, const ParamsType& params)
+    {
+        if (ev == EV_AUDIOMODE_CHANGE) {
+            onAudioModeChanged(static_cast<dsAudioPortType_t>(params.first),
+                               static_cast<dsAudioStereoMode_t>(params.second));
+        } else if (ev == EV_ATMOS_CAPABILITY_CHANGE) {
+            onAtmosCapabilitiesChanged(static_cast<dsATMOSCapability_t>(params.first), params.second != 0);
+        } else if (ev == EV_REEVALUATE_ATMOS) {
+            ReevaluateAtmosExperience();
+        } else if (ev == EV_ATMOS_EXP_CHANGED) {
+            SendNotify(params.first != 0);
+        }
+    }
+
+    void AudioOutputImplementation::NotifyIfAtmosExperienceChanged(Exchange::IAudioOutput::AudioModes mode, bool cap)
+    {
+        const bool newValue = EvaluateCurrentAtmosExperience(mode, cap);
+
+        _adminLock.Lock();
+        const bool changed = (_dolbyAtmosExperience != newValue);
+        _dolbyAtmosExperience = newValue;
         _adminLock.Unlock();
 
-        if (isAtmosExpChanged) {
+        if (changed) {
             LOGINFO("AudioOutputImplementation: dolbyAtmosExperience changed to %s",
                     newValue ? "true" : "false");
-            SendNotify(newValue);
+            dispatchEvent(EV_ATMOS_EXP_CHANGED, ParamsType{ static_cast<int32_t>(newValue), 0 });
         }
     }
 
@@ -155,38 +184,21 @@ namespace Plugin {
 
     Core::hresult AudioOutputImplementation::DolbyAtmosExperience(bool& enabled) const
     {
-        if (_atmosMetadataInitFailed || _soundModeInitFailed) {
-            LOGINFO("DolbyAtmosExperience: prior init failure detected, retrying HAL queries");
+        bool cap = false;
+        const bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
 
-            bool cap = false;
-            bool atmosErr = (AtmosMetadata(cap) != Core::ERROR_NONE);
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+        const bool soundErr = (SoundMode(mode) != Core::ERROR_NONE);
 
-            Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
-            bool soundErr = (SoundMode(mode) != Core::ERROR_NONE);
-
-            if (atmosErr || soundErr) {
-                LOGERR("DolbyAtmosExperience: retry failed (atmosMetadata=%s, soundMode=%s)",
-                       atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
-                return Core::ERROR_GENERAL;
-            }
-
-            _atmosMetadataInitFailed = false;
-            _soundModeInitFailed = false;
-
-            _adminLock.Lock();
-            _atmosMetaData = cap;
-            _soundMode = mode;
-            _adminLock.Unlock();
-
-            const_cast<AudioOutputImplementation*>(this)->UpdateCache();
-
-            LOGINFO("DolbyAtmosExperience: retry succeeded (atmosMetadata=%s, soundMode=%d)",
-                    cap ? "true" : "false", mode);
+        if (atmosErr || soundErr) {
+            LOGERR("DolbyAtmosExperience: failed (atmosMetadata=%s, soundMode=%s)",
+                   atmosErr ? "failed" : "ok", soundErr ? "failed" : "ok");
+            return Core::ERROR_GENERAL;
         }
 
-        _adminLock.Lock();
-        enabled = _dolbyAtmosExperience;
-        _adminLock.Unlock();
+        enabled = EvaluateCurrentAtmosExperience(mode, cap);
+        LOGERR("DolbyAtmosExperience: enabled=%s", enabled ? "true" : "false");
+        
         return Core::ERROR_NONE;
     }
 
@@ -241,9 +253,8 @@ namespace Plugin {
         LOGINFO("AudioOutputImplementation::onAudioModeChanged: portType=%d, smode=%d",
                 static_cast<int>(portType), static_cast<int>(smode));
 
-        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
-		bool isAudioModeChanged = false;
-       
+        bool isAudioModeChanged = false;
+
         try {
             device::List<device::AudioOutputPort> aPorts = device::Host::getInstance().getAudioOutputPorts();
             for (size_t i = 0; i < aPorts.size(); i++) {
@@ -264,11 +275,12 @@ namespace Plugin {
         }
 
         if (isAudioModeChanged) {
-            mode = DsAudioModeToSoundMode(device::AudioStereoMode(smode));
-            _adminLock.Lock();
-            _soundMode = mode;
-            _adminLock.Unlock();
-            UpdateCache();
+            bool cap = false;
+            if (AtmosMetadata(cap) != Core::ERROR_NONE) {
+                LOGERR("onAudioModeChanged: AtmosMetadata() query failed");
+                return;
+            }
+            NotifyIfAtmosExperienceChanged(DsAudioModeToSoundMode(device::AudioStereoMode(smode)), cap);
         }
     }
 
@@ -281,12 +293,13 @@ namespace Plugin {
     {
         LOGINFO("AudioOutputImplementation::onAtmosCapabilitiesChanged: atmosCapability=%d, status=%d",
                 atmosCapability, static_cast<int>(status));
-                
-     	_adminLock.Lock();
-        _atmosMetaData = (atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
-        _adminLock.Unlock();
 
-        UpdateCache();
+        Exchange::IAudioOutput::AudioModes mode = Exchange::IAudioOutput::UNKNOWN;
+        if (SoundMode(mode) != Core::ERROR_NONE) {
+            LOGERR("onAtmosCapabilitiesChanged: SoundMode() query failed");
+            return;
+        }
+        NotifyIfAtmosExperienceChanged(mode, atmosCapability == dsAUDIO_ATMOS_ATMOSMETADATA);
     }
 
     // -------------------------------------------------------------------------
@@ -319,17 +332,17 @@ namespace Plugin {
     // Step 2: soundMode must be PASSTHRU, DOLBYDIGITALPLUS, or SOUNDMODE_AUTO
     // -------------------------------------------------------------------------
 
-    bool AudioOutputImplementation::EvaluateCurrentAtmosExperience() const
+    bool AudioOutputImplementation::EvaluateCurrentAtmosExperience(Exchange::IAudioOutput::AudioModes mode, bool cap) const
     {
-        if (!_atmosMetaData) {
+        if (!cap) {
             return false;
         }
-				
-        switch (_soundMode) {
+
+        switch (mode) {
         case Exchange::IAudioOutput::PASSTHRU:
         case Exchange::IAudioOutput::DOLBYDIGITALPLUS:
-	case Exchange::IAudioOutput::SOUNDMODE_AUTO:
-	case  Exchange::IAudioOutput::SURROUND:
+        case Exchange::IAudioOutput::SOUNDMODE_AUTO:
+        case Exchange::IAudioOutput::SURROUND:
             return true;
         default:
             return false;
