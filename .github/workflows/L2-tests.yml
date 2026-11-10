@@ -525,6 +525,7 @@ jobs:
           -Wl,-wrap,system -Wl,-wrap,popen -Wl,-wrap,syslog
           -DUSE_IARMBUS
           -DHAS_RBUS
+          -DDEVICESETTINGS_PLUGIN_MOCKS
           -DENABLE_TELEMETRY_LOGGING
           -DHAS_API_SYSTEM"
           &&
@@ -590,6 +591,7 @@ jobs:
           -Wl,--no-as-needed
           -DUSE_IARMBUS
           -DHAS_RBUS
+          -DDEVICESETTINGS_PLUGIN_MOCKS
           -DRDK_SERVICE_L2_TEST"
           -DCOMCAST_CONFIG=OFF
           -DUSE_THUNDER_R4=ON
