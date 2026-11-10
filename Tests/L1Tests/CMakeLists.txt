@@ -43,34 +43,23 @@ set(HELPERS_DIR        ${CMAKE_CURRENT_SOURCE_DIR}/../../../entservices-helpers)
 # ---------------------------------------------------------------------------
 add_library(${MODULE_NAME} SHARED
     tests/test_AudioOutput.cpp
-
-    # devicesettings stub — provides the concrete implementations of the
-    # device::Host / AudioOutputPort / Manager etc. wrapper methods that
-    # delegate to the *Impl pointers (set by setImpl() in tests).
-    ${TESTFRAMEWORK_DIR}/Tests/mocks/devicesettings.cpp
 )
 
 target_include_directories(${MODULE_NAME}
     PRIVATE
-        # Plugin headers — AudioOutputImplementation.h and its DS includes
+        # Plugin headers — AudioOutputImplementation.h (includes DeviceSettingsInterface.h)
         ${PLUGIN_SOURCE_DIR}
 
-        # WPEFramework installed headers (Thunder, WPEFramework)
+        # WPEFramework installed headers (Thunder, WPEFramework, interfaces)
         ${CMAKE_INSTALL_PREFIX}/include/WPEFramework
 
-        # entservices-helpers installed headers
+        # entservices-helpers headers (DeviceSettingsInterface.h, UtilsLogging.h, ...)
         ${HELPERS_DIR}/helpers
 
-        # testframework: top-level mocks (devicesettings.h, Iarm.h, etc.)
+        # testframework: DeviceSettings COM-RPC mocks (DeviceSettingsMock.h, ...) and HdmiCecSinkMock.h
         ${TESTFRAMEWORK_DIR}/Tests/mocks
 
-        # testframework: devicesettings sub-mocks (HostMock.h, AudioOutputPortMock.h, ...)
-        ${TESTFRAMEWORK_DIR}/Tests/mocks/devicesettings
-
-        # testframework: Thunder mocks (ServiceMock.h, COMLinkMock.h)
-        # Local override first — shadows testframework version to fix Thunder R4_4-RDK
-        # incompatibilities (e.g. AddRef return type changed to uint32_t)
-        ${CMAKE_CURRENT_SOURCE_DIR}/mocks/thunder
+        # testframework: Thunder mocks (ServiceMock.h, WorkerPoolImplementation.h)
         ${TESTFRAMEWORK_DIR}/Tests/mocks/thunder
 )
 
