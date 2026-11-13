@@ -347,7 +347,7 @@ namespace Plugin {
                         comResult = audio->SetAudioLevel(audioHandle, static_cast<float>(volumeLevel));
                         if (comResult == Core::ERROR_NONE) {
                             if (static_cast<int>(currentLevel) != level) {
-                                dispatchEvent(EV_ONVOLUMELEVEL_CHANGED, ParamsType{ level, 0, audioport });
+                                dispatchEvent(EV_ONVOLUMELEVEL_CHANGED, ParamsType{ level, 0, std::move(audioport) });
                                 LOGINFO("SetAudioLevel success");
                             }
                         } else {
@@ -391,7 +391,7 @@ namespace Plugin {
                     if (comResult == Core::ERROR_NONE) {
                         if (cache_muted != muted) {
                             cache_muted = muted;
-                            dispatchEvent(EV_ONMUTESTATUS_CHANGED, ParamsType{ muted ? 1 : 0, 0, audioport });
+                            dispatchEvent(EV_ONMUTESTATUS_CHANGED, ParamsType{ muted ? 1 : 0, 0, std::move(audioport) });
                         }
                     } else {
                         LOGERR("SetAudioMute failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
@@ -423,7 +423,7 @@ namespace Plugin {
         if (audioport == "HDMI_ARC0") {
             level = hdmiArcVolumeLevel;
             volumeLevel = level;
-	        affectedAudioPort = audioport;
+	        affectedAudioPort = std::move(audioport);
 	        return Core::ERROR_NONE;
         }
  		{
@@ -436,7 +436,7 @@ namespace Plugin {
                     if (comResult == Core::ERROR_NONE) {
                         level = vol;
                         volumeLevel = level;
-						affectedAudioPort = audioport;
+						affectedAudioPort = std::move(audioport);
                     } else {
                         LOGERR("GetAudioLevel failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
                         success = false;
@@ -472,7 +472,7 @@ namespace Plugin {
                     Core::hresult comResult = audio->IsAudioMuted(audioHandle, muteStatus);
                     if (comResult == Core::ERROR_NONE) {
                         muted = muteStatus;
-						affectedAudioPort = audioport;
+						affectedAudioPort = std::move(audioport);
                     } else {
                         LOGERR("IsAudioMuted failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
                         success = false;
