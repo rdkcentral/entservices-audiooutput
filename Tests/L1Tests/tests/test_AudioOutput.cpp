@@ -78,6 +78,8 @@ constexpr int32_t kVideoHdmiHandle = 20;
 class MockAudioOutputNotification : public Exchange::IAudioOutput::INotification {
 public:
     MOCK_METHOD(void, OnDolbyAtmosExperienceChanged, (const bool dolbyAtmosExperience), (override));
+    MOCK_METHOD(void, OnVolumeLevelChanged, (const string& audioPort, const uint32_t& volumeLevel), (override));
+    MOCK_METHOD(void, OnMuteStatusChanged, (const string& audioPort, const bool muted), (override));
 
     BEGIN_INTERFACE_MAP(MockAudioOutputNotification)
     INTERFACE_ENTRY(Exchange::IAudioOutput::INotification)
@@ -1124,6 +1126,308 @@ TEST_F(AudioOutputImplementationTest, CecPowerStatus_FirstReportTriggersReevalua
     DrainWorkerPool();
 
     impl->Unregister(&(*notification));
+}
+
+// ===========================================================================
+// Tests: volume / mute APIs and notifications
+//
+// SetMuted and the ARC volume/mute values are cached in process-wide statics, so each
+// test leaves them at their initial values (unmuted, ARC volume 0, ARC unmuted).
+// ===========================================================================
+
+class AudioOutputVolumeTest : public AudioOutputImplementationTest {
+protected:
+    void TearDown() override
+    {
+        if (cecListener != nullptr) {
+            cecListener->ReportAudioDeviceConnectedStatus("false", ""); // resets the ARC cache
+        }
+        AudioOutputImplementationTest::TearDown();
+    }
+
+    void ConfigureWithCec()
+    {
+        ExposeHdmiCecSink();
+        ConfigureAndWait();
+        ASSERT_NE(cecListener, nullptr) << "Plugin did not register IHdmiCecSink::INotification";
+        cecListener->ReportAudioDeviceConnectedStatus("false", "");
+    }
+};
+
+// ---- SetVolumeLevel ----
+
+TEST_F(AudioOutputVolumeTest, SetVolumeLevel_Success_NotifiesOnChange)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, GetAudioLevel(kSpeakerHandle, _))
+        .WillByDefault(DoAll(SetArgReferee<1>(30.0f), Return(Core::ERROR_NONE)));
+
+    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*notification));
+    EXPECT_CALL(*audioMock, SetAudioLevel(kSpeakerHandle, 50.0f)).WillOnce(Return(Core::ERROR_NONE));
+    EXPECT_CALL(*notification, OnVolumeLevelChanged(::testing::Eq(std::string("SPEAKER0")), 50u)).Times(1);
+
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetVolumeLevel("SPEAKER0", 50, success));
+    EXPECT_TRUE(success);
+    DrainWorkerPool();
+
+    impl->Unregister(&(*notification));
+}
+
+TEST_F(AudioOutputVolumeTest, SetVolumeLevel_SameLevel_NoNotification)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, GetAudioLevel(kHdmiHandle, _))
+        .WillByDefault(DoAll(SetArgReferee<1>(50.0f), Return(Core::ERROR_NONE)));
+    ON_CALL(*audioMock, SetAudioLevel(kHdmiHandle, _)).WillByDefault(Return(Core::ERROR_NONE));
+
+    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*notification));
+    EXPECT_CALL(*notification, OnVolumeLevelChanged(_, _)).Times(0);
+
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetVolumeLevel("", 50, success)); // empty port -> HDMI0
+    DrainWorkerPool();
+
+    impl->Unregister(&(*notification));
+}
+
+TEST_F(AudioOutputVolumeTest, SetVolumeLevel_InvalidParameter_AboveMaximum)
+{
+    ConfigureAndWait();
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_INVALID_PARAMETER, impl->SetVolumeLevel("HDMI0", 101, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputVolumeTest, SetVolumeLevel_DeviceError)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, GetAudioLevel(kHdmiHandle, _)).WillByDefault(Return(Core::ERROR_GENERAL));
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetVolumeLevel("HDMI0", 40, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputVolumeTest, SetVolumeLevel_DeviceSettingsDown)
+{
+    ConfigureAndWait();
+    ASSERT_NE(dsPluginSink, nullptr);
+    dsPluginSink->Deactivated(kDsCallsign, &service);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetVolumeLevel("HDMI0", 40, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputVolumeTest, SetVolumeLevel_UnknownPort)
+{
+    ConfigureAndWait();
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetVolumeLevel("FOO0", 40, success));
+    EXPECT_FALSE(success);
+}
+
+// ---- SetMuted ----
+
+TEST_F(AudioOutputVolumeTest, SetMuted_Success_NotifiesOnChangeOnly)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, SetAudioMute(kSpeakerHandle, _)).WillByDefault(Return(Core::ERROR_NONE));
+
+    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*notification));
+    EXPECT_CALL(*notification, OnMuteStatusChanged(::testing::Eq(std::string("SPEAKER0")), true)).Times(1);
+    EXPECT_CALL(*notification, OnMuteStatusChanged(::testing::Eq(std::string("SPEAKER0")), false)).Times(1);
+
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetMuted("SPEAKER0", true, success));
+    EXPECT_TRUE(success);
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetMuted("SPEAKER0", true, success));  // unchanged -> no event
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetMuted("SPEAKER0", false, success)); // restores the cache
+    DrainWorkerPool();
+
+    impl->Unregister(&(*notification));
+}
+
+TEST_F(AudioOutputVolumeTest, SetMuted_DeviceSettingsDown)
+{
+    ConfigureAndWait();
+    ASSERT_NE(dsPluginSink, nullptr);
+    dsPluginSink->Deactivated(kDsCallsign, &service);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetMuted("HDMI0", true, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputVolumeTest, SetMuted_DeviceError)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, SetAudioMute(kHdmiHandle, _)).WillByDefault(Return(Core::ERROR_GENERAL));
+
+    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*notification));
+    EXPECT_CALL(*notification, OnMuteStatusChanged(_, _)).Times(0);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetMuted("HDMI0", true, success));
+    EXPECT_FALSE(success);
+    DrainWorkerPool();
+
+    impl->Unregister(&(*notification));
+}
+
+// ---- GetVolumeLevel ----
+
+TEST_F(AudioOutputVolumeTest, GetVolumeLevel_Success)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, GetAudioLevel(kSpeakerHandle, _))
+        .WillByDefault(DoAll(SetArgReferee<1>(42.0f), Return(Core::ERROR_NONE)));
+
+    std::string affected;
+    int level = -1;
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetVolumeLevel("SPEAKER0", affected, level, success));
+    EXPECT_TRUE(success);
+    EXPECT_EQ("SPEAKER0", affected);
+    EXPECT_EQ(42, level);
+}
+
+TEST_F(AudioOutputVolumeTest, GetVolumeLevel_ArcPort_ReturnsCachedValue)
+{
+    ConfigureWithCec();
+    cecListener->ReportAudioStatusEvent(0, 35);
+    DrainWorkerPool();
+
+    EXPECT_CALL(*audioMock, GetAudioLevel(_, _)).Times(0);
+    std::string affected;
+    int level = -1;
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetVolumeLevel("HDMI_ARC0", affected, level, success));
+    EXPECT_EQ("HDMI_ARC0", affected);
+    EXPECT_EQ(35, level);
+}
+
+TEST_F(AudioOutputVolumeTest, GetVolumeLevel_DeviceSettingsDown)
+{
+    ConfigureAndWait();
+    ASSERT_NE(dsPluginSink, nullptr);
+    dsPluginSink->Deactivated(kDsCallsign, &service);
+
+    std::string affected;
+    int level = 0;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetVolumeLevel("HDMI0", affected, level, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputVolumeTest, GetVolumeLevel_DeviceError)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, GetAudioLevel(kHdmiHandle, _)).WillByDefault(Return(Core::ERROR_GENERAL));
+
+    std::string affected;
+    int level = 0;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetVolumeLevel("", affected, level, success)); // empty port -> HDMI0
+    EXPECT_FALSE(success);
+}
+
+// ---- GetMuted ----
+
+TEST_F(AudioOutputVolumeTest, GetMuted_Success)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, IsAudioMuted(kSpeakerHandle, _))
+        .WillByDefault(DoAll(SetArgReferee<1>(true), Return(Core::ERROR_NONE)));
+
+    std::string affected;
+    bool muted = false;
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetMuted("SPEAKER0", affected, muted, success));
+    EXPECT_TRUE(success);
+    EXPECT_EQ("SPEAKER0", affected);
+    EXPECT_TRUE(muted);
+}
+
+TEST_F(AudioOutputVolumeTest, GetMuted_DeviceSettingsDown)
+{
+    ConfigureAndWait();
+    ASSERT_NE(dsPluginSink, nullptr);
+    dsPluginSink->Deactivated(kDsCallsign, &service);
+
+    std::string affected;
+    bool muted = false;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetMuted("HDMI0", affected, muted, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputVolumeTest, GetMuted_DeviceError)
+{
+    ConfigureAndWait();
+    ON_CALL(*audioMock, IsAudioMuted(kHdmiHandle, _)).WillByDefault(Return(Core::ERROR_GENERAL));
+
+    std::string affected;
+    bool muted = false;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetMuted("HDMI0", affected, muted, success));
+    EXPECT_FALSE(success);
+}
+
+// ---- HdmiCecSink ARC audio status notifications ----
+
+TEST_F(AudioOutputVolumeTest, ArcAudioStatus_NotifiesVolumeAndMuteOnChangeOnly)
+{
+    ConfigureWithCec();
+
+    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*notification));
+    EXPECT_CALL(*notification, OnVolumeLevelChanged(::testing::Eq(std::string("HDMI_ARC0")), 40u)).Times(1);
+    EXPECT_CALL(*notification, OnMuteStatusChanged(::testing::Eq(std::string("HDMI_ARC0")), true)).Times(1);
+
+    cecListener->ReportAudioStatusEvent(1, 40);
+    cecListener->ReportAudioStatusEvent(1, 40); // unchanged -> no events
+    DrainWorkerPool();
+
+    impl->Unregister(&(*notification));
+}
+
+TEST_F(AudioOutputVolumeTest, ArcAudioStatus_InvalidParameter_Ignored)
+{
+    ConfigureWithCec();
+
+    auto notification = Core::ProxyType<MockAudioOutputNotification>::Create();
+    impl->Register(&(*notification));
+    EXPECT_CALL(*notification, OnVolumeLevelChanged(_, _)).Times(0);
+    EXPECT_CALL(*notification, OnMuteStatusChanged(_, _)).Times(0);
+
+    cecListener->ReportAudioStatusEvent(1, 101);
+    cecListener->ReportAudioStatusEvent(1, -1);
+    DrainWorkerPool();
+
+    impl->Unregister(&(*notification));
+}
+
+TEST_F(AudioOutputVolumeTest, AudioDeviceConnected_ResetsArcCache)
+{
+    ConfigureWithCec();
+
+    cecListener->ReportAudioStatusEvent(0, 40);
+    DrainWorkerPool();
+    cecListener->ReportAudioDeviceConnectedStatus("false", "");
+
+    std::string affected;
+    int level = -1;
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetVolumeLevel("HDMI_ARC0", affected, level, success));
+    EXPECT_EQ(0, level);
 }
 
 // ===========================================================================
