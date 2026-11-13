@@ -327,15 +327,15 @@ namespace Plugin {
 
     Core::hresult AudioOutputImplementation::SetVolumeLevel(const string& audioPort, const uint32_t& volumeLevel, bool& success)
     {
-	if (volumeLevel > 100) {
+		if (volumeLevel > 100) {
             LOGWARN("volumeLevel invalid: %u (expected range [0, 100])", volumeLevel);
        	    success = false;
             return Core::ERROR_INVALID_PARAMETER; 
     	}
-	int level = volumeLevel;
+		int level = volumeLevel;
         success = true;
         string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
-	{
+		{
             const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
             if (INVALID_DS_HANDLE != audioHandle) {
                 auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
@@ -362,7 +362,6 @@ namespace Plugin {
                 } else {
                     LOGERR("IDeviceSettingsAudio not available");
                     success = false;
-		    return Core::ERROR_UNAVAILABLE;
                 }
             } else {
                 LOGERR("Failed to get audio port handle for audioPort='%s'", audioport.c_str());
@@ -383,7 +382,7 @@ namespace Plugin {
         success = true;
         string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
         LOGWARN("AudioOutputImplementation::SetMuted called Audio Port :%s muted:%d\n", audioport.c_str(), muted);
-	{
+		{
             const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
             if (INVALID_DS_HANDLE != audioHandle) {
                 auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
@@ -417,9 +416,9 @@ namespace Plugin {
 
     Core::hresult AudioOutputImplementation::GetVolumeLevel(const string& audioPort, string& affectedAudioPort, int& volumeLevel, bool& success)
     {
-	success = true;
+		success = true;
         float level = 0;
-	string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
+		string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
         // DS_IARM: HDMI_ARC0 uses cached hdmiArcVolumeLevel (updated via CEC onArcAudioStatusEventHandler)
         if (audioport == "HDMI_ARC0") {
             level = hdmiArcVolumeLevel;
@@ -427,7 +426,7 @@ namespace Plugin {
 	        affectedAudioPort = audioport;
 	        return Core::ERROR_NONE;
         }
- 	{
+ 		{
          const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
           if (INVALID_DS_HANDLE != audioHandle) {
                auto* audio = DSHelper::AcquireSubInterface<Exchange::IDeviceSettingsAudio>();
@@ -437,7 +436,7 @@ namespace Plugin {
                     if (comResult == Core::ERROR_NONE) {
                         level = vol;
                         volumeLevel = level;
-			affectedAudioPort = audioport;
+						affectedAudioPort = audioport;
                     } else {
                         LOGERR("GetAudioLevel failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
                         success = false;
@@ -452,7 +451,7 @@ namespace Plugin {
                 success = false;
             }
         }
-	return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+		return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
     }
     
     // -------------------------------------------------------------------------
@@ -473,7 +472,7 @@ namespace Plugin {
                     Core::hresult comResult = audio->IsAudioMuted(audioHandle, muteStatus);
                     if (comResult == Core::ERROR_NONE) {
                         muted = muteStatus;
-			affectedAudioPort = audioport;
+						affectedAudioPort = audioport;
                     } else {
                         LOGERR("IsAudioMuted failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
                         success = false;
