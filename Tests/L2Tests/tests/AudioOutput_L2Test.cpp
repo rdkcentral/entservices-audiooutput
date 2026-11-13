@@ -310,6 +310,7 @@ AudioOutputL2Test::AudioOutputL2Test()
     mHalMuted = false;
     mHalAudioFail = false;
     mSetAudioLevelCount = 0;
+    {
         std::lock_guard<std::mutex> lock(mAudioPortStateMutex);
         mDisabledAudioPorts.clear();
         mDisconnectedAudioPorts.clear();
