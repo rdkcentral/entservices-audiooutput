@@ -60,6 +60,10 @@ namespace Plugin {
         Core::hresult DolbyAtmosExperience(bool& enabled /* @out */) const override;
         Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
+        Core::hresult SetVolumeLevel(const string& audioPort, const uint32_t& volumeLevel, bool& success /* @out */) override;
+		Core::hresult SetMuted(const string& audioPort, const bool muted, bool& success /* @out */) override;
+		Core::hresult GetVolumeLevel(const string& audioPort, string& affectedAudioPort /* @out */, int& volumeLevel /* @out */, bool& success /* @out */) override;
+		Core::hresult GetMuted(const string& audioPort, string& affectedAudioPort /* @out */, bool& muted /* @out */, bool& success /* @out */) override;
 
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
@@ -90,6 +94,16 @@ namespace Plugin {
             void ReportAudioDevicePowerStatus(const int powerStatus) override
             {
                 _parent.ReportAudioDevicePowerStatus(powerStatus);
+            }
+
+            void ReportAudioStatusEvent(const int muteStatus, const int volumeLevel) override 
+            {
+                _parent.OnArcAudioStatusChanged(std::move(muteStatus), volumeLevel);
+            }
+
+            void ReportAudioDeviceConnectedStatus(const string status, const string audioDeviceConnected) override
+            {
+                _parent.OnAudioDeviceConnectedStatusEventHandler(std::move(status),  std::move(audioDeviceConnected));
             }
 
         private:
@@ -177,14 +191,18 @@ namespace Plugin {
             EV_AUDIOMODE_CHANGE = 0,
             EV_ATMOS_CAPABILITY_CHANGE,
             EV_REEVALUATE_ATMOS,
-            EV_ATMOS_EXP_CHANGED
+            EV_ATMOS_EXP_CHANGED,
+            EV_ONVOLUMELEVEL_CHANGED,
+	    EV_ONMUTESTATUS_CHANGED
         };
 
-        // Event payload: (port type, stereo mode), (atmos capability, status) or (new dolbyAtmosExperience, unused)
+        // Event payload: (port type, stereo mode), (atmos capability, status) or (new dolbyAtmosExperience, unused) or (volumelevel, unused, audioPort) or (muteStatus, unused, audioPort)
         // depending on the event; unused for EV_REEVALUATE_ATMOS.
+        // audioPort used by volume/mute events; empty otherwise
         struct ParamsType {
             int32_t first;
             int32_t second;
+            string  audioPort;   
         };
 
         // Worker-pool job: carries (impl*, Event, ParamsType); calls impl->Dispatch() on a worker thread.
@@ -230,6 +248,8 @@ namespace Plugin {
         bool EvaluateCurrentAtmosExperience(Exchange::IAudioOutput::AudioModes mode, bool cap) const;
 
         void SendNotify(bool dolbyAtmosExperience);
+        void SendVolumeLevelNotify(const string& audioPort, uint32_t volumeLevel);
+        void SendMuteStatusNotify(const string& audioPort, bool muted);
         void NotifyIfAtmosExperienceChanged(Exchange::IAudioOutput::AudioModes mode, bool cap);
         void ReevaluateAtmosExperience();
         void OnHdmiInEventHotPlug(int port, bool isConnected);
@@ -238,6 +258,8 @@ namespace Plugin {
         void onAtmosCapabilitiesChanged(Exchange::IDeviceSettingsAudio::DolbyAtmosCapability atmosCapability,
                                         bool status);
         void ReportAudioDevicePowerStatus(const int powerStatus);
+        void OnArcAudioStatusChanged(int muteStatus, int volumeLevel);
+        void OnAudioDeviceConnectedStatusEventHandler(string status, string audioDeviceConnected);
         void Dispatch(Event ev, const ParamsType& params);
         void dispatchEvent(Event ev, const ParamsType& params);
 
