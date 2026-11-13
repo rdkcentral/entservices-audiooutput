@@ -65,6 +65,43 @@ public:
         _cv.notify_all();
     }
 
+    void OnVolumeLevelChanged(const string& audioPort, const uint32_t& volumeLevel) override
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _lastVolumePort = audioPort;
+        _lastVolumeLevel = volumeLevel;
+        ++_volumeCount;
+        _cv.notify_all();
+    }
+
+    void OnMuteStatusChanged(const string& audioPort, const bool muted) override
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _lastMutePort = audioPort;
+        _lastMuted = muted;
+        ++_muteCount;
+        _cv.notify_all();
+    }
+
+    bool WaitForVolumeNotification(int timeoutMs = 2000)
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        return _cv.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                            [this] { return _volumeCount > 0; });
+    }
+
+    bool WaitForMuteNotification(int timeoutMs = 2000)
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        return _cv.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                            [this] { return _muteCount > 0; });
+    }
+
+    std::string LastVolumePort() const { std::lock_guard<std::mutex> lock(_mutex); return _lastVolumePort; }
+    uint32_t LastVolumeLevel() const { std::lock_guard<std::mutex> lock(_mutex); return _lastVolumeLevel; }
+    std::string LastMutePort() const { std::lock_guard<std::mutex> lock(_mutex); return _lastMutePort; }
+    bool LastMuted() const { std::lock_guard<std::mutex> lock(_mutex); return _lastMuted; }
+
     bool WaitForNotification(int timeoutMs = 2000)
     {
         std::unique_lock<std::mutex> lock(_mutex);
@@ -84,6 +121,12 @@ private:
     std::condition_variable _cv;
     bool _notified;
     std::atomic<unsigned int> _count;
+    unsigned int _volumeCount{0};
+    unsigned int _muteCount{0};
+    std::string _lastVolumePort;
+    uint32_t _lastVolumeLevel{0};
+    std::string _lastMutePort;
+    bool _lastMuted{false};
 };
 
 // ---------------------------------------------------------------------------
@@ -192,6 +235,12 @@ protected:
     static std::atomic<intptr_t> mLastAtmosQueryHandle;
     static std::atomic<unsigned int> mSetStereoModeCount;
 
+    // Volume/mute HAL state backing the dsGet/SetAudioLevel and dsSet/IsAudioMute mocks.
+    // mHalAudioFail makes those HAL calls return an error.
+    static std::atomic<float> mHalVolume;
+    static std::atomic<bool> mHalMuted;
+    static std::atomic<bool> mHalAudioFail;
+    static std::atomic<unsigned int> mSetAudioLevelCount;
     // DeviceSettings audio COM-RPC client, used to drive IDeviceSettingsAudio::SetStereoMode
     Core::ProxyType<RPC::InvokeServerType<1, 0, 4>> mDsEngine;
     Core::ProxyType<RPC::CommunicatorClient>        mDsClient;
@@ -229,6 +278,10 @@ std::set<intptr_t> AudioOutputL2Test::mDisabledAudioPorts;
 std::set<intptr_t> AudioOutputL2Test::mDisconnectedAudioPorts;
 std::atomic<intptr_t> AudioOutputL2Test::mLastAtmosQueryHandle{0};
 std::atomic<unsigned int> AudioOutputL2Test::mSetStereoModeCount{0};
+std::atomic<float> AudioOutputL2Test::mHalVolume{0.0f};
+std::atomic<bool> AudioOutputL2Test::mHalMuted{false};
+std::atomic<bool> AudioOutputL2Test::mHalAudioFail{false};
+std::atomic<unsigned int> AudioOutputL2Test::mSetAudioLevelCount{0};
 
 AudioOutputL2Test::AudioOutputL2Test()
     : L2TestMocks()
@@ -253,7 +306,10 @@ AudioOutputL2Test::AudioOutputL2Test()
     mSinkAtmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
     mSinkAtmosQueryCount = 0;
     mLastAtmosQueryHandle = 0;
-    {
+    mHalVolume = 0.0f;
+    mHalMuted = false;
+    mHalAudioFail = false;
+    mSetAudioLevelCount = 0;
         std::lock_guard<std::mutex> lock(mAudioPortStateMutex);
         mDisabledAudioPorts.clear();
         mDisconnectedAudioPorts.clear();
@@ -396,6 +452,48 @@ void AudioOutputL2Test::ConfigureDeviceSettingsMocks()
     ON_CALL(*mDsAudioHalMock, dsAudioAtmosCapsChangeRegisterCB(_))
         .WillByDefault(Invoke([](dsAtmosCapsChangeCB_t cbFun) {
             mAtmosCapsChangeCB = cbFun;
+            return dsERR_NONE;
+        }));
+
+    // Volume and mute are backed by mHalVolume / mHalMuted; mHalAudioFail forces an error
+    ON_CALL(*mDsAudioHalMock, dsGetAudioLevel(_, _))
+        .WillByDefault(Invoke([](intptr_t, float* level) {
+            if (mHalAudioFail) {
+                return dsERR_GENERAL;
+            }
+            if (level) {
+                *level = mHalVolume.load();
+            }
+            return dsERR_NONE;
+        }));
+
+    ON_CALL(*mDsAudioHalMock, dsSetAudioLevel(_, _))
+        .WillByDefault(Invoke([](intptr_t, float level) {
+            if (mHalAudioFail) {
+                return dsERR_GENERAL;
+            }
+            ++mSetAudioLevelCount;
+            mHalVolume = level;
+            return dsERR_NONE;
+        }));
+
+    ON_CALL(*mDsAudioHalMock, dsSetAudioMute(_, _))
+        .WillByDefault(Invoke([](intptr_t, bool mute) {
+            if (mHalAudioFail) {
+                return dsERR_GENERAL;
+            }
+            mHalMuted = mute;
+            return dsERR_NONE;
+        }));
+
+    ON_CALL(*mDsAudioHalMock, dsIsAudioMute(_, _))
+        .WillByDefault(Invoke([](intptr_t, bool* muted) {
+            if (mHalAudioFail) {
+                return dsERR_GENERAL;
+            }
+            if (muted) {
+                *muted = mHalMuted.load();
+            }
             return dsERR_NONE;
         }));
 }
@@ -1041,5 +1139,147 @@ TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_HdmiPortAbsent_QueriesHostHandle)
     EXPECT_GT(mSinkAtmosQueryCount.load(), 0u) << "STB must query the sink Atmos capability";
     EXPECT_NE(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), mLastAtmosQueryHandle.load())
         << "HDMI0 is absent from the DeviceSettings config, so it must not be queried";
+}
+
+// ===========================================================================
+// Volume / mute APIs. SPEAKER0 is always present in the DeviceSettings config, so the
+// tests use it. The HAL state lives in mHalVolume / mHalMuted. SetMuted caches the last
+// value inside the plugin, so every mute test ends unmuted.
+// ===========================================================================
+TEST_F(AudioOutputL2Test, JsonRpc_SetVolumeLevel_Success_UpdatesHalAndNotifies)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalVolume = 30.0f;
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    params["volumeLevel"] = 50;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setVolumeLevel", params, result));
+    EXPECT_TRUE(result["success"].Boolean());
+    EXPECT_EQ(50.0f, mHalVolume.load()) << "The HAL must receive the new level";
+
+    ASSERT_TRUE(sink->WaitForVolumeNotification()) << "A changed level must notify observers";
+    EXPECT_EQ("SPEAKER0", sink->LastVolumePort());
+    EXPECT_EQ(50u, sink->LastVolumeLevel());
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_AboveMaximum_ReturnsInvalidParameter)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_INVALID_PARAMETER, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 101, success));
+    EXPECT_FALSE(success);
+    EXPECT_EQ(0u, mSetAudioLevelCount.load()) << "An invalid level must not reach the HAL";
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SameLevel_NoNotification)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalVolume = 50.0f;
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 50, success));
+    EXPECT_TRUE(success);
+    EXPECT_FALSE(sink->WaitForVolumeNotification(500)) << "An unchanged level must not notify";
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_HalError_ReturnsGeneral)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalAudioFail = true;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 40, success));
+    EXPECT_FALSE(success);
+    EXPECT_FALSE(sink->WaitForVolumeNotification(500)) << "A failed set must not notify";
+    mHalAudioFail = false;
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_UnknownPort_ReturnsGeneral)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->SetVolumeLevel("FOO0", 40, success));
+    EXPECT_FALSE(success);
+    EXPECT_EQ(0u, mSetAudioLevelCount.load());
+}
+
+TEST_F(AudioOutputL2Test, JsonRpc_SetMuted_Success_UpdatesHalAndNotifies)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    params["muted"] = true;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setMuted", params, result));
+    EXPECT_TRUE(result["success"].Boolean());
+    EXPECT_TRUE(mHalMuted.load()) << "The HAL must receive the mute request";
+
+    ASSERT_TRUE(sink->WaitForMuteNotification()) << "A changed mute state must notify observers";
+    EXPECT_EQ("SPEAKER0", sink->LastMutePort());
+    EXPECT_TRUE(sink->LastMuted());
+
+    // Restore the unmuted state cached by the plugin
+    JsonObject unmuteParams, unmuteResult;
+    unmuteParams["audioPort"] = "SPEAKER0";
+    unmuteParams["muted"] = false;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setMuted", unmuteParams, unmuteResult));
+    EXPECT_FALSE(mHalMuted.load());
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, JsonRpc_GetVolumeLevel_Success)
+{
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+    mHalVolume = 42.0f;
+
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "getVolumeLevel", params, result));
+    EXPECT_TRUE(result["success"].Boolean());
+    EXPECT_EQ("SPEAKER0", result["affectedAudioPort"].String());
+    EXPECT_EQ(42, static_cast<int>(result["volumeLevel"].Number()));
+}
+
+TEST_F(AudioOutputL2Test, JsonRpc_GetMuted_Success)
+{
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+    mHalMuted = true;
+
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "getMuted", params, result));
+    EXPECT_TRUE(result["success"].Boolean());
+    EXPECT_EQ("SPEAKER0", result["affectedAudioPort"].String());
+    EXPECT_TRUE(result["muted"].Boolean());
+    mHalMuted = false;
 }
 
