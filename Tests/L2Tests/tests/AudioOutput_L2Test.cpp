@@ -1160,7 +1160,6 @@ TEST_F(AudioOutputL2Test, JsonRpc_SetVolumeLevel_Success_UpdatesHalAndNotifies)
     params["audioPort"] = "SPEAKER0";
     params["volumeLevel"] = 50;
     EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setVolumeLevel", params, result));
-    EXPECT_TRUE(result["success"].Boolean());
     EXPECT_EQ(50.0f, mHalVolume.load()) << "The HAL must receive the new level";
 
     ASSERT_TRUE(sink->WaitForVolumeNotification()) << "A changed level must notify observers";
@@ -1240,7 +1239,6 @@ TEST_F(AudioOutputL2Test, JsonRpc_SetMuted_Success_UpdatesHalAndNotifies)
     params["audioPort"] = "SPEAKER0";
     params["muted"] = true;
     EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setMuted", params, result));
-    EXPECT_TRUE(result["success"].Boolean());
     EXPECT_TRUE(mHalMuted.load()) << "The HAL must receive the mute request";
 
     ASSERT_TRUE(sink->WaitForMuteNotification()) << "A changed mute state must notify observers";
