@@ -103,7 +103,7 @@ namespace Plugin {
 
             void ReportAudioDeviceConnectedStatus(const string status, const string audioDeviceConnected) override
             {
-                _parent.OnAudioDeviceConnectedStatusEventHandler(std::move(status),  audioDeviceConnected);
+                _parent.OnAudioDeviceConnectedStatusEventHandler(std::move(status),  std::move(audioDeviceConnected));
             }
 
         private:
