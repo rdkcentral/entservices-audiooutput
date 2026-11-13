@@ -61,9 +61,9 @@ namespace Plugin {
         Core::hresult Register(Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult Unregister(const Exchange::IAudioOutput::INotification* notification) override;
         Core::hresult SetVolumeLevel(const string& audioPort, const uint32_t& volumeLevel, bool& success /* @out */) override;
-	Core::hresult SetMuted(const string& audioPort, const bool muted, bool& success /* @out */) override;
-	Core::hresult GetVolumeLevel(const string& audioPort, string& affectedAudioPort /* @out */, int& volumeLevel /* @out */, bool& success /* @out */) override;
-	Core::hresult GetMuted(const string& audioPort, string& affectedAudioPort /* @out */, bool& muted /* @out */, bool& success /* @out */) override;
+		Core::hresult SetMuted(const string& audioPort, const bool muted, bool& success /* @out */) override;
+		Core::hresult GetVolumeLevel(const string& audioPort, string& affectedAudioPort /* @out */, int& volumeLevel /* @out */, bool& success /* @out */) override;
+		Core::hresult GetMuted(const string& audioPort, string& affectedAudioPort /* @out */, bool& muted /* @out */, bool& success /* @out */) override;
 
         // Exchange::IConfiguration
         uint32_t Configure(PluginHost::IShell* service) override;
@@ -98,12 +98,12 @@ namespace Plugin {
 
             void ReportAudioStatusEvent(const int muteStatus, const int volumeLevel) override 
             {
-                _parent.OnArcAudioStatusChanged(muteStatus, volumeLevel);
+                _parent.OnArcAudioStatusChanged(std::move(muteStatus), volumeLevel);
             }
 
             void ReportAudioDeviceConnectedStatus(const string status, const string audioDeviceConnected) override
             {
-                _parent.OnAudioDeviceConnectedStatusEventHandler(status,  audioDeviceConnected);
+                _parent.OnAudioDeviceConnectedStatusEventHandler(std::move(status),  audioDeviceConnected);
             }
 
         private:
