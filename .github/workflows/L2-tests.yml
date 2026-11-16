@@ -321,15 +321,6 @@ jobs:
           ccec/CCEC.hpp
           ccec/MessageEncoder.hpp
           ccec/host/RDK.hpp
-          systemservices/proc/readproc.h
-          systemservices/secure_wrapper.h
-          tr181api.h
-          tvError.h
-          tvTypes.h
-          tvTypesODM.h
-          tvSettings.h
-          tvSettingsExtODM.h
-          tvSettingsODM.h
           network/wifiSrvMgrIarmIf.h
           network/netsrvmgrIarm.h
           edid-parser.hpp
