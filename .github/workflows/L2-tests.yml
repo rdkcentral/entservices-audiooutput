@@ -294,6 +294,9 @@ jobs:
           headers/rdk/iarmmgrs-hal
           headers/audiocapturemgr
           headers/ccec/drivers
+          headers/ccec/host
+          headers/systemservices
+          headers/systemservices/proc
           headers/network
           &&
           cd headers
@@ -308,6 +311,25 @@ jobs:
           rdk/iarmbus/iarmUtil.h
           audiocapturemgr/audiocapturemgr_iarm.h
           ccec/drivers/CecIARMBusMgr.h
+          ccec/FrameListener.hpp
+          ccec/Connection.hpp
+          ccec/Assert.hpp
+          ccec/Messages.hpp
+          ccec/MessageDecoder.hpp
+          ccec/MessageProcessor.hpp
+          ccec/CECFrame.hpp
+          ccec/CCEC.hpp
+          ccec/MessageEncoder.hpp
+          ccec/host/RDK.hpp
+          systemservices/proc/readproc.h
+          systemservices/secure_wrapper.h
+          tr181api.h
+          tvError.h
+          tvTypes.h
+          tvTypesODM.h
+          tvSettings.h
+          tvSettingsExtODM.h
+          tvSettingsODM.h
           network/wifiSrvMgrIarmIf.h
           network/netsrvmgrIarm.h
           edid-parser.hpp
