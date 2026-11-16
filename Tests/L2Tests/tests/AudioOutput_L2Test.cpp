@@ -31,6 +31,9 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <cstring>
+#include <unistd.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IDeviceSettings.h>
 #include <interfaces/IDeviceSettingsAudio.h>
@@ -1410,3 +1413,276 @@ TEST_F(AudioOutputL2Test, ComRpc_GetMuted_UnknownPort_ReturnsGeneral)
     EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->GetMuted("FOO0", affected, muted, success));
     EXPECT_FALSE(success);
 }
+
+// ===========================================================================
+// HdmiCecSink driven notifications.
+//
+// The real HdmiCecSink (and PowerManager) plugins are activated, and CEC frames are injected
+// through the FrameListener HdmiCecSink registers on the mocked CEC connection. HdmiCecSink
+// then calls IHdmiCecSink::INotification on AudioOutput, exactly as on a device:
+//   Report Audio Status (0x7A)   -> ReportAudioStatusEvent        -> OnArcAudioStatusChanged
+//   Report Physical Address (0x84) from the audio system
+//                                -> ReportAudioDeviceConnectedStatus -> OnAudioDeviceConnectedStatusEventHandler
+//   Report Power Status (0x90)   -> ReportAudioDevicePowerStatus  -> Atmos re-evaluation
+//
+// AudioOutput looks HdmiCecSink up when it is configured, so it is re-activated after
+// HdmiCecSink is up. The plugin caches the ARC volume/mute in process-wide statics, so each
+// test leaves them at their initial values.
+// ===========================================================================
+class AudioOutputCecL2Test : public AudioOutputL2Test {
+protected:
+    AudioOutputCecL2Test();
+    ~AudioOutputCecL2Test() override;
+
+    std::vector<FrameListener*> mCecListeners;
+
+    void InjectCecFrame(const std::vector<uint8_t>& bytes);
+    void ResetArcCache();
+    bool WaitForArcVolume(int expected, int timeoutMs = 3000);
+};
+
+AudioOutputCecL2Test::AudioOutputCecL2Test()
+    : AudioOutputL2Test()
+{
+    {
+        std::ofstream restarted("/tmp/pwrmgr_restarted");
+        restarted << "2\n";
+    }
+
+    // PowerManager and HdmiCecSink platform mocks, as in the HdmiCecSink L2 fixture
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_INIT())
+        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_INIT())
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_SetWakeupSrc(::testing::_, ::testing::_))
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_GetPowerState(::testing::_))
+        .WillRepeatedly(::testing::Invoke([](PWRMgr_PowerState_t* powerState) {
+            *powerState = PWRMGR_POWERSTATE_ON;
+            return PWRMGR_SUCCESS;
+        }));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_SetPowerState(::testing::_))
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
+        .WillOnce(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
+        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+
+    ON_CALL(*p_rfcApiImplMock, getRFCParameter(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [](char*, const char* pcParameterName, RFC_ParamData_t* pstParamData) {
+                if (strcmp("RFC_DATA_ThermalProtection_POLL_INTERVAL", pcParameterName) == 0) {
+                    strcpy(pstParamData->value, "2");
+                    return WDMP_SUCCESS;
+                } else if (strcmp("RFC_ENABLE_ThermalProtection", pcParameterName) == 0) {
+                    strcpy(pstParamData->value, "true");
+                    return WDMP_SUCCESS;
+                } else if (strcmp("RFC_DATA_ThermalProtection_DEEPSLEEP_GRACE_INTERVAL", pcParameterName) == 0) {
+                    strcpy(pstParamData->value, "6");
+                    return WDMP_SUCCESS;
+                } else if (strcmp("Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.HdmiCecSink.CECVersion", pcParameterName) == 0) {
+                    strncpy(pstParamData->value, "1.4", sizeof(pstParamData->value));
+                    return WDMP_SUCCESS;
+                }
+                return WDMP_FAILURE;
+            }));
+
+    EXPECT_CALL(*p_mfrMock, mfrSetTempThresholds(::testing::_, ::testing::_))
+        .WillRepeatedly(::testing::Return(mfrERR_NONE));
+    EXPECT_CALL(*p_mfrMock, mfrGetTemperature(::testing::_, ::testing::_, ::testing::_))
+        .WillRepeatedly(::testing::Invoke(
+            [](mfrTemperatureState_t* curState, int* curTemperature, int* wifiTemperature) {
+                *curTemperature = 90;
+                *curState = (mfrTemperatureState_t)0;
+                *wifiTemperature = 25;
+                return mfrERR_NONE;
+            }));
+
+    ON_CALL(*p_connectionMock, poll(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [](const LogicalAddress&, const Throw_e&) {
+                throw CECNoAckException();
+            }));
+    EXPECT_CALL(*p_libCCECMock, getPhysicalAddress(::testing::_))
+        .WillRepeatedly(::testing::Invoke(
+            [](uint32_t* physAddress) {
+                *physAddress = (uint32_t)0x12345678;
+            }));
+    ON_CALL(*p_messageEncoderMock, encode(::testing::Matcher<const DataBlock&>(::testing::_)))
+        .WillByDefault(::testing::ReturnRef(CECFrame::getInstance()));
+    ON_CALL(*p_messageEncoderMock, encode(::testing::Matcher<const UserControlPressed&>(::testing::_)))
+        .WillByDefault(::testing::ReturnRef(CECFrame::getInstance()));
+    ON_CALL(*p_connectionMock, addFrameListener(::testing::_))
+        .WillByDefault([this](FrameListener* listener) {
+            mCecListeners.push_back(listener);
+        });
+    ON_CALL(*p_connectionMock, open()).WillByDefault(::testing::Return());
+    ON_CALL(*p_connectionMock, close()).WillByDefault(::testing::Return());
+
+    EXPECT_EQ(Core::ERROR_NONE, ActivateService("org.rdk.PowerManager"));
+    EXPECT_EQ(Core::ERROR_NONE, ActivateService("org.rdk.HdmiCecSink"));
+
+    // AudioOutput registers with HdmiCecSink in Configure(), so restart it now that the sink is active
+    if (mAudioOutputPlugin != nullptr) {
+        mAudioOutputPlugin->Release();
+        mAudioOutputPlugin = nullptr;
+    }
+    DeactivateService(AUDIOOUTPUT_CALLSIGN);
+    usleep(CLEANUP_DELAY_MICROSECONDS);
+    EXPECT_EQ(Core::ERROR_NONE, ActivateService(AUDIOOUTPUT_CALLSIGN));
+
+    // Let HdmiCecSink allocate its logical address and AudioOutput finish activating
+    usleep(DS_SETTLE_DELAY_MICROSECONDS * 3);
+}
+
+AudioOutputCecL2Test::~AudioOutputCecL2Test()
+{
+    if (mAudioOutputPlugin != nullptr) {
+        mAudioOutputPlugin->Release();
+        mAudioOutputPlugin = nullptr;
+    }
+    // AudioOutput unregisters from HdmiCecSink when it is deactivated, so it goes first
+    DeactivateService(AUDIOOUTPUT_CALLSIGN);
+
+    sleep(3);
+    EXPECT_EQ(Core::ERROR_NONE, DeactivateService("org.rdk.HdmiCecSink"));
+    EXPECT_EQ(Core::ERROR_NONE, DeactivateService("org.rdk.PowerManager"));
+
+    std::remove("/tmp/pwrmgr_restarted");
+}
+
+void AudioOutputCecL2Test::InjectCecFrame(const std::vector<uint8_t>& bytes)
+{
+    std::vector<uint8_t> buffer(bytes);
+    CECFrame frame(buffer.data(), buffer.size());
+    for (auto* listener : mCecListeners) {
+        if (listener != nullptr) {
+            listener->notify(frame);
+        }
+    }
+}
+
+// Report Audio Status with volume 0 and no mute brings the cached ARC state back to its initial value
+void AudioOutputCecL2Test::ResetArcCache()
+{
+    InjectCecFrame({ 0x50, 0x7A, 0x00 });
+    WaitForArcVolume(0);
+}
+
+bool AudioOutputCecL2Test::WaitForArcVolume(int expected, int timeoutMs)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (mAudioOutputPlugin != nullptr) {
+        std::string affected;
+        int level = -1;
+        bool success = false;
+        if (mAudioOutputPlugin->GetVolumeLevel("HDMI_ARC0", affected, level, success) == Core::ERROR_NONE
+            && level == expected) {
+            return true;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        usleep(100000);
+    }
+    return false;
+}
+
+// Report Audio Status 0x50: volume 80, not muted
+TEST_F(AudioOutputCecL2Test, Cec_ReportAudioStatus_NotifiesArcVolume)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    InjectCecFrame({ 0x50, 0x7A, 0x50 });
+
+    ASSERT_TRUE(sink->WaitForVolumeNotification(5000)) << "A new ARC volume must notify observers";
+    EXPECT_EQ("HDMI_ARC0", sink->LastVolumePort());
+    EXPECT_EQ(80u, sink->LastVolumeLevel());
+    EXPECT_FALSE(sink->WaitForMuteNotification(500)) << "Mute is unchanged, so it must not notify";
+    EXPECT_TRUE(WaitForArcVolume(80)) << "GetVolumeLevel(HDMI_ARC0) must return the cached value";
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+    ResetArcCache();
+}
+
+// Report Audio Status 0xD0: muted (bit 7), volume 80
+TEST_F(AudioOutputCecL2Test, Cec_ReportAudioStatus_Mute_NotifiesArcMute)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    InjectCecFrame({ 0x50, 0x7A, 0xD0 });
+
+    ASSERT_TRUE(sink->WaitForMuteNotification(5000)) << "A new ARC mute state must notify observers";
+    EXPECT_EQ("HDMI_ARC0", sink->LastMutePort());
+    EXPECT_TRUE(sink->LastMuted());
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+    ResetArcCache();
+}
+
+// A volume above 100 is rejected by AudioOutput
+TEST_F(AudioOutputCecL2Test, Cec_ReportAudioStatus_InvalidVolume_IsIgnored)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    InjectCecFrame({ 0x50, 0x7A, 0x65 }); // volume 101
+
+    EXPECT_FALSE(sink->WaitForVolumeNotification(1000)) << "An out-of-range volume must be ignored";
+    EXPECT_TRUE(WaitForArcVolume(0));
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+// An audio system appearing on the bus (logical address 5) resets the cached ARC state
+TEST_F(AudioOutputCecL2Test, Cec_AudioDeviceConnected_ResetsArcCache)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+
+    InjectCecFrame({ 0x50, 0x7A, 0x50 });
+    ASSERT_TRUE(WaitForArcVolume(80)) << "Precondition: the ARC volume must be cached";
+
+    // Report Physical Address from device 5 adds it, which HdmiCecSink reports as an audio device connection
+    InjectCecFrame({ 0x5F, 0x84, 0x20, 0x00, 0x05 });
+
+    EXPECT_TRUE(WaitForArcVolume(0)) << "The audio device connection must reset the cached ARC volume";
+}
+
+// The audio system's power status is reported once HdmiCecSink has been asked for it. AudioOutput
+// reacts to the first report by re-reading the sink Atmos capability.
+TEST_F(AudioOutputCecL2Test, Cec_ReportPowerStatus_ReevaluatesAtmos)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod("org.rdk.HdmiCecSink", "requestAudioDevicePowerStatus", params, result));
+
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    mSinkAtmosQueryCount = 0;
+
+    InjectCecFrame({ 0x50, 0x90, 0x01 }); // standby
+    InjectCecFrame({ 0x50, 0x90, 0x00 }); // on
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (mSinkAtmosQueryCount.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+        usleep(100000);
+    }
+    EXPECT_GT(mSinkAtmosQueryCount.load(), 0u) << "The first power status report must re-read the sink Atmos capability";
+}
+
