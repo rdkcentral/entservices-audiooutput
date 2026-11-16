@@ -513,7 +513,6 @@ jobs:
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/systemservices/proc
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks
           -I $GITHUB_WORKSPACE/install/usr/include
-          -I $GITHUB_WORKSPACE/rdk-halif-device_settings/include
           -I $GITHUB_WORKSPACE/entservices-helpers/helpers
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
@@ -593,6 +592,7 @@ jobs:
           -I $GITHUB_WORKSPACE/install/usr/include/WPEFramework
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks
           -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/ccec/drivers
+          -I $GITHUB_WORKSPACE/rdk-halif-device_settings/include
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
           -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h
