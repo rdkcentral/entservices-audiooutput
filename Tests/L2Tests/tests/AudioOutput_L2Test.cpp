@@ -1448,10 +1448,17 @@ AudioOutputCecL2Test::AudioOutputCecL2Test()
         std::ofstream restarted("/tmp/pwrmgr_restarted");
         restarted << "2\n";
     }
-
-    // PowerManager and HdmiCecSink platform mocks, as in the HdmiCecSink L2 fixture
+    {
+        // HdmiCecSink persists "CEC disabled" when it is deactivated, which would leave CEC off for
+        // the next test. Reset the settings file so every test starts with CEC enabled.
+        std::ofstream cecData("/opt/persistent/ds/cecData_2.json");
+        cecData << "0\n";
+    }
+    // PowerManager and HdmiCecSink platform mocks, as in the HdmiCecSink L2 fixture.
+    // DeviceSettings stays active for the whole process and keeps PowerManager alive, so the HAL
+    // terminate calls may not happen before the mock is verified.
     EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_INIT())
-        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+        .WillRepeatedly(::testing::Return(DEEPSLEEPMGR_SUCCESS));
     EXPECT_CALL(*p_powerManagerHalMock, PLAT_INIT())
         .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
     EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_SetWakeupSrc(::testing::_, ::testing::_))
@@ -1464,9 +1471,9 @@ AudioOutputCecL2Test::AudioOutputCecL2Test()
     EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_SetPowerState(::testing::_))
         .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
     EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
-        .WillOnce(::testing::Return(PWRMGR_SUCCESS));
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
     EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
-        .WillOnce(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+        .WillRepeatedly(::testing::Return(DEEPSLEEPMGR_SUCCESS));
 
     ON_CALL(*p_rfcApiImplMock, getRFCParameter(::testing::_, ::testing::_, ::testing::_))
         .WillByDefault(::testing::Invoke(
