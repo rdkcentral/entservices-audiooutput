@@ -335,6 +335,7 @@ namespace Plugin {
 		int level = volumeLevel;
         success = true;
         string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
+		LOGWARN("AudioOutputImplementation::SetVolumeLevel called for Audio Port :%s with volumeLevel:%d\n", audioport.c_str(), level);
 		{
             const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
             if (INVALID_DS_HANDLE != audioHandle) {
@@ -344,11 +345,12 @@ namespace Plugin {
                     float currentLevel = -1.0f;
                     Core::hresult comResult = audio->GetAudioLevel(audioHandle, currentLevel);
                     if (comResult == Core::ERROR_NONE) {
-                        comResult = audio->SetAudioLevel(audioHandle, static_cast<float>(volumeLevel));
+                        comResult = audio->SetAudioLevel(audioHandle, static_cast<float>(level));
                         if (comResult == Core::ERROR_NONE) {
                             if (static_cast<int>(currentLevel) != level) {
                                 dispatchEvent(EV_ONVOLUMELEVEL_CHANGED, ParamsType{ level, 0, std::move(audioport) });
                                 LOGINFO("SetAudioLevel success");
+								LOGINFO("AudioOutputImplementation::SetVolumeLevel success");
                             }
                         } else {
                             LOGERR("SetAudioLevel failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
@@ -381,7 +383,7 @@ namespace Plugin {
         static bool cache_muted = false;
         success = true;
         string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
-        LOGWARN("AudioOutputImplementation::SetMuted called Audio Port :%s muted:%d\n", audioport.c_str(), muted);
+        LOGWARN("AudioOutputImplementation::SetMuted called for Audio Port :%s with muted:%s\n", audioport.c_str(), muted ? "true" : "false");
 		{
             const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
             if (INVALID_DS_HANDLE != audioHandle) {
@@ -392,6 +394,7 @@ namespace Plugin {
                         if (cache_muted != muted) {
                             cache_muted = muted;
                             dispatchEvent(EV_ONMUTESTATUS_CHANGED, ParamsType{ muted ? 1 : 0, 0, std::move(audioport) });
+							LOGINFO("AudioOutputImplementation::SetMuted success");
                         }
                     } else {
                         LOGERR("SetAudioMute failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
@@ -426,6 +429,7 @@ namespace Plugin {
 	        affectedAudioPort = std::move(audioport);
 	        return Core::ERROR_NONE;
         }
+		LOGWARN("AudioOutputImplementation::GetVolumeLevel called for Audio Port :%s\n", audioport.c_str());
  		{
          const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
           if (INVALID_DS_HANDLE != audioHandle) {
@@ -437,6 +441,7 @@ namespace Plugin {
                         level = vol;
                         volumeLevel = level;
 						affectedAudioPort = std::move(audioport);
+						LOGINFO("AudioOutputImplementation::GetVolumeLevel success volumeLevel:%d\n", volumeLevel);
                     } else {
                         LOGERR("GetAudioLevel failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
                         success = false;
@@ -464,6 +469,7 @@ namespace Plugin {
         success = true;
         bool muteStatus = false;
         string audioport = (! audioPort.empty()) ? audioPort : "HDMI0";
+		LOGWARN("AudioOutputImplementation::GetMuted called for Audio Port :%s\n", audioport.c_str());
         {
           const int32_t audioHandle = DSHelper::getCachedAudioPortHandle(audioport);
           if (INVALID_DS_HANDLE != audioHandle) {
@@ -473,6 +479,7 @@ namespace Plugin {
                     if (comResult == Core::ERROR_NONE) {
                         muted = muteStatus;
 						affectedAudioPort = std::move(audioport);
+						LOGINFO("AudioOutputImplementation::GetMuted success muted:%s\n", muted ? "true" : "false");
                     } else {
                         LOGERR("IsAudioMuted failed for audioPort='%s', Error=%d", audioport.c_str(), static_cast<int>(comResult));
                         success = false;
