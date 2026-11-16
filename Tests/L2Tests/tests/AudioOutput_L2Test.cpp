@@ -1652,7 +1652,10 @@ TEST_F(AudioOutputCecL2Test, Cec_ReportAudioStatus_InvalidVolume_IsIgnored)
     mAudioOutputPlugin->Unregister(&(*sink));
 }
 
-// An audio system appearing on the bus (logical address 5) resets the cached ARC state
+// HdmiCecSink reports the audio system (logical address 5) as connected when it discovers it, which
+// resets AudioOutput's cached ARC state. The poll thread discovers it right after CEC is enabled, i.e.
+// before AudioOutput registers, so CEC is switched off and on again to trigger the discovery while
+// AudioOutput is listening.
 TEST_F(AudioOutputCecL2Test, Cec_AudioDeviceConnected_ResetsArcCache)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
@@ -1662,10 +1665,20 @@ TEST_F(AudioOutputCecL2Test, Cec_AudioDeviceConnected_ResetsArcCache)
     InjectCecFrame({ 0x50, 0x7A, 0x50 });
     ASSERT_TRUE(WaitForArcVolume(80)) << "Precondition: the ARC volume must be cached";
 
-    // Report Physical Address from device 5 adds it, which HdmiCecSink reports as an audio device connection
-    InjectCecFrame({ 0x5F, 0x84, 0x20, 0x00, 0x05 });
+    // Disabling CEC deletes the connection and its frame listener
+    mCecListeners.clear();
 
-    EXPECT_TRUE(WaitForArcVolume(0)) << "The audio device connection must reset the cached ARC volume";
+    JsonObject params, result;
+    params["enabled"] = false;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod("org.rdk.HdmiCecSink", "setEnabled", params, result));
+
+    params.Clear();
+    result.Clear();
+    params["enabled"] = true;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod("org.rdk.HdmiCecSink", "setEnabled", params, result));
+
+
+    EXPECT_TRUE(WaitForArcVolume(0, 10000)) << "The audio device connection must reset the cached ARC volume";
 }
 
 // The audio system's power status is reported once HdmiCecSink has been asked for it. AudioOutput
