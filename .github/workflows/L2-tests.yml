@@ -116,6 +116,8 @@ jobs:
           libgstreamer1.0-dev
           libgstreamer-plugins-base1.0-dev
           libprotobuf-dev
+          libboost-all-dev
+          libwebsocketpp-dev
           protobuf-compiler
           libgrpc++-dev
           protobuf-compiler-grpc
