@@ -804,7 +804,7 @@ jobs:
           /etc/device.properties
           &&
           echo "BUILD_TYPE=VBN" | sudo tee /etc/device.properties
-	  &&
+          &&
           echo "0" | sudo tee /opt/persistent/ds/cecData_2.json
           &&
           echo "RDK_PROFILE=TV" | sudo tee -a /etc/device.properties
