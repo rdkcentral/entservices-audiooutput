@@ -193,10 +193,10 @@ namespace Plugin {
             EV_REEVALUATE_ATMOS,
             EV_ATMOS_EXP_CHANGED,
             EV_ONVOLUMELEVEL_CHANGED,
-	    EV_ONMUTESTATUS_CHANGED
+	   	    EV_ONMUTESTATUS_CHANGED
         };
 
-        // Event payload: (port type, stereo mode), (atmos capability, status) or (new dolbyAtmosExperience, unused) or (volumelevel, unused, audioPort) or (muteStatus, unused, audioPort)
+        // Event payload: (port type, stereo mode), (atmos capability, status) or (new dolbyAtmosExperience, unused) or (volumelevel, unused, audioPort) and (muteStatus, unused, audioPort)
         // depending on the event; unused for EV_REEVALUATE_ATMOS.
         // audioPort used by volume/mute events; empty otherwise
         struct ParamsType {
