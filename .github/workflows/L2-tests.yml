@@ -206,7 +206,7 @@ jobs:
         with:
           repository: rdkcentral/entservices-powermanager
           path: entservices-powermanager
-          ref: topic/RDKEMW-6755_testCaseFailureFixes
+          ref: develop
 
       - name: Checkout entservices-hdmicecsink
         uses: actions/checkout@v3
