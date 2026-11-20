@@ -149,7 +149,8 @@ namespace Plugin {
     void AudioOutputImplementation::OnAudioDeviceConnectedStatusEventHandler(string status, string audioDeviceConnected)
     {
         LOGINFO("ARC audio device connection status changed: status=%s, audioDeviceConnected=%s", status.c_str(), audioDeviceConnected.c_str());
-        //Reset to initial value incase of disconnection
+        //Reset to initial value incase of connect or disconnect event for ARC
+		//TODO: Need to subscribe for other events coming from ARC and implement handlers accordingly, which is part of displaysettings plugin
         hdmiArcVolumeLevel = 0;
         hdmiArcMuteStatus = false;
     }
