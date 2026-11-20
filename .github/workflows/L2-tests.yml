@@ -56,8 +56,8 @@ env:
   REPO_NAME: "audiooutput"
   THUNDER_TOOLS_COMMIT_SHA: "d5dd83c7c19c49c7f25c558c126500bd2d64f7a4"
   THUNDER_COMMIT_SHA: "2c0fcc5529e7da734be558ca6efa05d934dcce31"
-  INTERFACES_REF: "develop" 
-  TESTFRAMEWORK_REF: "2.1.4"
+  INTERFACES_REF: "develop"
+  TESTFRAMEWORK_REF: "2.1.5"
 
 jobs:
   L2-tests:
@@ -116,6 +116,8 @@ jobs:
           libgstreamer1.0-dev
           libgstreamer-plugins-base1.0-dev
           libprotobuf-dev
+          libboost-all-dev
+          libwebsocketpp-dev
           protobuf-compiler
           libgrpc++-dev
           protobuf-compiler-grpc
@@ -193,6 +195,24 @@ jobs:
         with:
           repository: rdkcentral/entservices-helpers
           path: entservices-helpers
+          ref: 1.0.6
+
+      # The real HdmiCecSink plugin (and the PowerManager plugin it needs) are built so the L2 tests
+      # can inject CEC frames and receive ReportAudioStatusEvent / ReportAudioDeviceConnectedStatus /
+      # ReportAudioDevicePowerStatus through AudioOutput's registered IHdmiCecSink listener.
+      # Refs match the entservices-hdmicecsink L2 workflow.
+      - name: Checkout entservices-powermanager
+        uses: actions/checkout@v3
+        with:
+          repository: rdkcentral/entservices-powermanager
+          path: entservices-powermanager
+          ref: develop
+
+      - name: Checkout entservices-hdmicecsink
+        uses: actions/checkout@v3
+        with:
+          repository: rdkcentral/entservices-hdmicecsink
+          path: entservices-hdmicecsink
           ref: develop
 
       # ---- Patches ---------------------------------------------------------
@@ -276,6 +296,9 @@ jobs:
           headers/rdk/iarmmgrs-hal
           headers/audiocapturemgr
           headers/ccec/drivers
+          headers/ccec/host
+          headers/systemservices
+          headers/systemservices/proc
           headers/network
           &&
           cd headers
@@ -290,6 +313,16 @@ jobs:
           rdk/iarmbus/iarmUtil.h
           audiocapturemgr/audiocapturemgr_iarm.h
           ccec/drivers/CecIARMBusMgr.h
+          ccec/FrameListener.hpp
+          ccec/Connection.hpp
+          ccec/Assert.hpp
+          ccec/Messages.hpp
+          ccec/MessageDecoder.hpp
+          ccec/MessageProcessor.hpp
+          ccec/CECFrame.hpp
+          ccec/CCEC.hpp
+          ccec/MessageEncoder.hpp
+          ccec/host/RDK.hpp
           network/wifiSrvMgrIarmIf.h
           network/netsrvmgrIarm.h
           edid-parser.hpp
@@ -467,6 +500,166 @@ jobs:
           &&
           cmake --install build/entservices-devicesettings    
 
+    # PowerManager provides the Platform subsystem and power state HdmiCecSink depends on.
+      # Flags are the ones used by the entservices-hdmicecsink L2 workflow.
+      - name: Build entservices-powermanager
+        run: >
+          cmake
+          -S "$GITHUB_WORKSPACE/entservices-powermanager"
+          -B build/entservices-powermanager
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
+          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
+          -DCMAKE_CXX_FLAGS="
+          -DEXCEPTIONS_ENABLE=ON
+          -fprofile-arcs
+          -ftest-coverage
+          -DTHUNDER_VERSION=4
+          -DTHUNDER_VERSION_MAJOR=4
+          -DTHUNDER_VERSION_MINOR=4
+          -DDEVICE_TYPE=AVOutputTV
+          -DPLUGIN_PERSISTENTSTORE_PATH="/tmp/secure/persistent/rdkservicestore"
+          -DPLUGIN_PERSISTENTSTORE_LEGACYPATH="/tmp/persistent/rdkservicestore"
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/systemservices
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/systemservices/proc
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks
+          -I $GITHUB_WORKSPACE/install/usr/include
+          -I $GITHUB_WORKSPACE/entservices-helpers/helpers
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Udev.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Wraps.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/maintenanceMGR.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/pkg.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/secure_wrappermock.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/wpa_ctrl_mock.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/readprocMockInterface.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/btmgr.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tr181api.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvSettings.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvError.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvSettingsExtODM.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvSettingsODM.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvTypes.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/essos-resmgr.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Telemetry.h
+          -Wall -Wno-unused-result -Wno-deprecated-declarations -Wno-error=format=
+          -Wl,-wrap,system -Wl,-wrap,popen -Wl,-wrap,syslog -Wl,-wrap,v_secure_system -Wl,-wrap,v_secure_popen -Wl,-wrap,v_secure_pclose -Wl,-wrap,unlink
+          -DUSE_IARMBUS
+          -DENABLE_ERM
+          -DRDK_LOG_MILESTONE
+          -DRDK_SERVICE_L2_TEST
+          -DDISABLE_SECURITY_TOKEN
+          -DHAS_API_POWERSTATE
+          -DENABLE_THERMAL_PROTECTION"
+          -DPLUGIN_PERSISTENTSTORE_PATH="/tmp/secure/persistent/rdkservicestore"
+          -DPLUGIN_PERSISTENTSTORE_LEGACYPATH="/tmp/persistent/rdkservicestore"
+          -DCOMCAST_CONFIG=OFF
+          -DCMAKE_DISABLE_FIND_PACKAGE_DS=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_Udev=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_RBus=ON
+          -DPLUGIN_POWERMANAGER=ON
+          -DPLUGIN_DISPLAYSETTINGS=ON
+          -DUSE_THUNDER_R4=ON
+          -DPLUGIN_L2Tests=ON
+          -DRDK_SERVICE_L2_TEST=ON
+          -DDS_FOUND=ON
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          &&
+          cmake --build build/entservices-powermanager -j8
+          &&
+          cmake --install build/entservices-powermanager
+
+      # HdmiCecSink is the source of ReportAudioStatusEvent, ReportAudioDeviceConnectedStatus and
+      # ReportAudioDevicePowerStatus. Its HDMI-CEC library is replaced by the testframework mocks.
+      - name: Build entservices-hdmicecsink
+        run: >
+          cmake
+          -S "$GITHUB_WORKSPACE/entservices-hdmicecsink"
+          -B build/entservices-hdmicecsink
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.TOOLCHAIN_FILE }}"
+          -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install/usr"
+          -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/install/tools/cmake"
+          -DHIDE_NON_EXTERNAL_SYMBOLS=OFF
+          -DCMAKE_CXX_FLAGS="
+          -DEXCEPTIONS_ENABLE=ON
+          -fprofile-arcs
+          -ftest-coverage
+          -DTHUNDER_VERSION=4
+          -DTHUNDER_VERSION_MAJOR=4
+          -DTHUNDER_VERSION_MINOR=4
+          -DDEVICE_TYPE=AVOutputTV
+          -DPLUGIN_PERSISTENTSTORE_PATH="/tmp/secure/persistent/rdkservicestore"
+          -DPLUGIN_PERSISTENTSTORE_LEGACYPATH="/tmp/persistent/rdkservicestore"
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmbus
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/rdk/iarmmgrs-hal
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/systemservices
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/systemservices/proc
+          -I $GITHUB_WORKSPACE/install/usr/include
+          -I $GITHUB_WORKSPACE/install/usr/include/WPEFramework
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks
+          -I $GITHUB_WORKSPACE/entservices-testframework/Tests/headers/ccec/drivers
+          -I $GITHUB_WORKSPACE/rdk-halif-device_settings/include
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Iarm.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Rfc.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/RBus.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Udev.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Wraps.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/maintenanceMGR.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/pkg.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/secure_wrappermock.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/wpa_ctrl_mock.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/readprocMockInterface.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/btmgr.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tr181api.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvSettings.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvError.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvSettingsExtODM.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvSettingsODM.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/tvTypes.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/essos-resmgr.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/HdmiCec.h
+          -include $GITHUB_WORKSPACE/entservices-testframework/Tests/mocks/Telemetry.h
+          -Werror -Wall -Wno-unused-result -Wno-deprecated-declarations -Wno-error=format=
+          -DUSE_IARMBUS
+          -DENABLE_DEEP_SLEEP
+          -DENABLE_SET_WAKEUP_SRC_CONFIG
+          -DENABLE_THERMAL_PROTECTION
+          -DUSE_DRM_SCREENCAPTURE
+          -DHAS_API_SYSTEM
+          -DHAS_API_POWERSTATE
+          -DHAS_RBUS
+          -DRDK_SERVICE_L2_TEST
+          -DDISABLE_SECURITY_TOKEN
+          -DENABLE_THERMAL_PROTECTION"
+          -DPLUGIN_PERSISTENTSTORE_PATH="/tmp/secure/persistent/rdkservicestore"
+          -DPLUGIN_PERSISTENTSTORE_LEGACYPATH="/tmp/persistent/rdkservicestore"
+          -DCOMCAST_CONFIG=OFF
+          -DCMAKE_DISABLE_FIND_PACKAGE_DS=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_IARMBus=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_Udev=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_RFC=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_RBus=ON
+          -DCMAKE_DISABLE_FIND_PACKAGE_CEC=ON
+          -DPLUGIN_HDMICECSINK=ON
+          -DUSE_THUNDER_R4=ON
+          -DPLUGIN_L2Tests=ON
+          -DRDK_SERVICE_L2_TEST=ON
+          -DDS_FOUND=ON
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          &&
+          cmake --build build/entservices-hdmicecsink
+          &&
+          cmake --install build/entservices-hdmicecsink
+
       # Build entservices-audiooutput with the L2 test shared library.
       # -DPLUGIN_L2Tests=ON    → builds Tests/L2Tests/CMakeLists.txt
       # -DRDK_SERVICE_L2_TEST=ON → activates L2 test code paths
@@ -617,6 +810,7 @@ jobs:
           /tmp/secure/persistent/rdkservicestore
           /tmp/persistent/rdkservicestore
           /opt/persistent
+          /opt/persistent/ds
           /opt/logs
           &&
           sudo touch
@@ -626,6 +820,8 @@ jobs:
           /etc/device.properties
           &&
           echo "BUILD_TYPE=VBN" | sudo tee /etc/device.properties
+          &&
+          echo "0" | sudo tee /opt/persistent/ds/cecData_2.json
           &&
           echo "RDK_PROFILE=TV" | sudo tee -a /etc/device.properties
 
