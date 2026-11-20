@@ -1203,7 +1203,7 @@ TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SameLevel_NoNotification)
     mAudioOutputPlugin->Unregister(&(*sink));
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_HalError_ReturnsGeneral)
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_HalError_ReportsFailure)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1213,7 +1213,7 @@ TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_HalError_ReturnsGeneral)
 
     mHalAudioFail = true;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 40, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 40, success)); // failure is reported through success
     EXPECT_FALSE(success);
     EXPECT_FALSE(sink->WaitForVolumeNotification(500)) << "A failed set must not notify";
     mHalAudioFail = false;
@@ -1221,14 +1221,14 @@ TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_HalError_ReturnsGeneral)
     mAudioOutputPlugin->Unregister(&(*sink));
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_UnknownPort_ReturnsGeneral)
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_UnknownPort_ReportsFailure)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->SetVolumeLevel("FOO0", 40, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("FOO0", 40, success));
     EXPECT_FALSE(success);
     EXPECT_EQ(0u, mSetAudioLevelCount.load());
 }
@@ -1310,7 +1310,7 @@ TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_ArcPort_ReturnsCachedValueWithou
 }
 
 // The level is read first, then set: only the set fails here.
-TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SetHalError_ReturnsGeneralNoNotification)
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SetHalError_ReportsFailureNoNotification)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1321,7 +1321,7 @@ TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SetHalError_ReturnsGeneralNoNoti
     mHalVolume = 10.0f;
     mHalSetLevelFail = true;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 40, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 40, success));
     EXPECT_FALSE(success);
     EXPECT_FALSE(sink->WaitForVolumeNotification(500)) << "A failed set must not notify";
     mHalSetLevelFail = false;
@@ -1329,7 +1329,7 @@ TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SetHalError_ReturnsGeneralNoNoti
     mAudioOutputPlugin->Unregister(&(*sink));
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_SetMuted_HalError_ReturnsGeneralNoNotification)
+TEST_F(AudioOutputL2Test, ComRpc_SetMuted_HalError_ReportsFailureNoNotification)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1339,7 +1339,7 @@ TEST_F(AudioOutputL2Test, ComRpc_SetMuted_HalError_ReturnsGeneralNoNotification)
 
     mHalAudioFail = true;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->SetMuted("SPEAKER0", true, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetMuted("SPEAKER0", true, success));
     EXPECT_FALSE(success);
     EXPECT_FALSE(sink->WaitForMuteNotification(500)) << "A failed mute must not notify";
     mHalAudioFail = false;
@@ -1347,18 +1347,18 @@ TEST_F(AudioOutputL2Test, ComRpc_SetMuted_HalError_ReturnsGeneralNoNotification)
     mAudioOutputPlugin->Unregister(&(*sink));
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_SetMuted_UnknownPort_ReturnsGeneral)
+TEST_F(AudioOutputL2Test, ComRpc_SetMuted_UnknownPort_ReportsFailure)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
     usleep(DS_SETTLE_DELAY_MICROSECONDS);
 
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->SetMuted("FOO0", true, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetMuted("FOO0", true, success));
     EXPECT_FALSE(success);
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_HalError_ReturnsGeneral)
+TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_HalError_ReportsFailure)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1368,12 +1368,12 @@ TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_HalError_ReturnsGeneral)
     std::string affected;
     int level = 0;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->GetVolumeLevel("SPEAKER0", affected, level, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetVolumeLevel("SPEAKER0", affected, level, success));
     EXPECT_FALSE(success);
     mHalAudioFail = false;
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_UnknownPort_ReturnsGeneral)
+TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_UnknownPort_ReportsFailure)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1382,11 +1382,11 @@ TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_UnknownPort_ReturnsGeneral)
     std::string affected;
     int level = 0;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->GetVolumeLevel("FOO0", affected, level, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetVolumeLevel("FOO0", affected, level, success));
     EXPECT_FALSE(success);
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_GetMuted_HalError_ReturnsGeneral)
+TEST_F(AudioOutputL2Test, ComRpc_GetMuted_HalError_ReportsFailure)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1396,12 +1396,12 @@ TEST_F(AudioOutputL2Test, ComRpc_GetMuted_HalError_ReturnsGeneral)
     std::string affected;
     bool muted = false;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->GetMuted("SPEAKER0", affected, muted, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetMuted("SPEAKER0", affected, muted, success));
     EXPECT_FALSE(success);
     mHalAudioFail = false;
 }
 
-TEST_F(AudioOutputL2Test, ComRpc_GetMuted_UnknownPort_ReturnsGeneral)
+TEST_F(AudioOutputL2Test, ComRpc_GetMuted_UnknownPort_ReportsFailure)
 {
     ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
     ASSERT_NE(mAudioOutputPlugin, nullptr);
@@ -1410,7 +1410,7 @@ TEST_F(AudioOutputL2Test, ComRpc_GetMuted_UnknownPort_ReturnsGeneral)
     std::string affected;
     bool muted = false;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, mAudioOutputPlugin->GetMuted("FOO0", affected, muted, success));
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetMuted("FOO0", affected, muted, success));
     EXPECT_FALSE(success);
 }
 

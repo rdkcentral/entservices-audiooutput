@@ -1208,7 +1208,7 @@ TEST_F(AudioOutputVolumeTest, SetVolumeLevel_DeviceError)
     ON_CALL(*audioMock, GetAudioLevel(kHdmiHandle, _)).WillByDefault(Return(Core::ERROR_GENERAL));
 
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetVolumeLevel("HDMI0", 40, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetVolumeLevel("HDMI0", 40, success)); // failure is reported through success
     EXPECT_FALSE(success);
 }
 
@@ -1219,7 +1219,7 @@ TEST_F(AudioOutputVolumeTest, SetVolumeLevel_DeviceSettingsDown)
     dsPluginSink->Deactivated(kDsCallsign, &service);
 
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetVolumeLevel("HDMI0", 40, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetVolumeLevel("HDMI0", 40, success));
     EXPECT_FALSE(success);
 }
 
@@ -1228,7 +1228,7 @@ TEST_F(AudioOutputVolumeTest, SetVolumeLevel_UnknownPort)
     ConfigureAndWait();
 
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetVolumeLevel("FOO0", 40, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetVolumeLevel("FOO0", 40, success));
     EXPECT_FALSE(success);
 }
 
@@ -1261,7 +1261,7 @@ TEST_F(AudioOutputVolumeTest, SetMuted_DeviceSettingsDown)
     dsPluginSink->Deactivated(kDsCallsign, &service);
 
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetMuted("HDMI0", true, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetMuted("HDMI0", true, success));
     EXPECT_FALSE(success);
 }
 
@@ -1275,7 +1275,7 @@ TEST_F(AudioOutputVolumeTest, SetMuted_DeviceError)
     EXPECT_CALL(*notification, OnMuteStatusChanged(_, _)).Times(0);
 
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->SetMuted("HDMI0", true, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->SetMuted("HDMI0", true, success));
     EXPECT_FALSE(success);
     DrainWorkerPool();
 
@@ -1323,7 +1323,7 @@ TEST_F(AudioOutputVolumeTest, GetVolumeLevel_DeviceSettingsDown)
     std::string affected;
     int level = 0;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetVolumeLevel("HDMI0", affected, level, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetVolumeLevel("HDMI0", affected, level, success));
     EXPECT_FALSE(success);
 }
 
@@ -1335,7 +1335,7 @@ TEST_F(AudioOutputVolumeTest, GetVolumeLevel_DeviceError)
     std::string affected;
     int level = 0;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetVolumeLevel("", affected, level, success)); // empty port -> HDMI0
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetVolumeLevel("", affected, level, success)); // empty port -> HDMI0
     EXPECT_FALSE(success);
 }
 
@@ -1365,7 +1365,7 @@ TEST_F(AudioOutputVolumeTest, GetMuted_DeviceSettingsDown)
     std::string affected;
     bool muted = false;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetMuted("HDMI0", affected, muted, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetMuted("HDMI0", affected, muted, success));
     EXPECT_FALSE(success);
 }
 
@@ -1377,7 +1377,7 @@ TEST_F(AudioOutputVolumeTest, GetMuted_DeviceError)
     std::string affected;
     bool muted = false;
     bool success = true;
-    EXPECT_EQ(Core::ERROR_GENERAL, impl->GetMuted("HDMI0", affected, muted, success));
+    EXPECT_EQ(Core::ERROR_NONE, impl->GetMuted("HDMI0", affected, muted, success));
     EXPECT_FALSE(success);
 }
 
