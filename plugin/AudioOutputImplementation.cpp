@@ -371,7 +371,7 @@ namespace Plugin {
                 success = false;
             }
         }
-       	return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+       	return Core::ERROR_NONE;
     }
     
     // -------------------------------------------------------------------------
@@ -411,7 +411,7 @@ namespace Plugin {
                 success = false;
             }
         }
-        return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+        return Core::ERROR_NONE;
     }
     
    // -------------------------------------------------------------------------
@@ -457,7 +457,7 @@ namespace Plugin {
                 success = false;
             }
         }
-		return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+		return Core::ERROR_NONE;
     }
     
     // -------------------------------------------------------------------------
@@ -495,7 +495,7 @@ namespace Plugin {
                 success = false;
             }
         }
-        return (success ? Core::ERROR_NONE : Core::ERROR_GENERAL);
+        return Core::ERROR_NONE;
     }
 
     // -------------------------------------------------------------------------
