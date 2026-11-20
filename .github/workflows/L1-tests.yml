@@ -162,7 +162,7 @@ jobs:
         with:
           repository: rdkcentral/entservices-helpers
           path: entservices-helpers
-          ref: develop
+          ref: 1.0.6
 
       # ---- Patches ---------------------------------------------------------
 
