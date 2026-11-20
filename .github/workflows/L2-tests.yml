@@ -195,7 +195,7 @@ jobs:
         with:
           repository: rdkcentral/entservices-helpers
           path: entservices-helpers
-          ref: develop
+          ref: 1.0.6
 
       # The real HdmiCecSink plugin (and the PowerManager plugin it needs) are built so the L2 tests
       # can inject CEC frames and receive ReportAudioStatusEvent / ReportAudioDeviceConnectedStatus /
