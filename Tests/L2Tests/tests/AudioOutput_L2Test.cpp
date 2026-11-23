@@ -31,6 +31,9 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <cstring>
+#include <unistd.h>
 #include <interfaces/IAudioOutput.h>
 #include <interfaces/IDeviceSettings.h>
 #include <interfaces/IDeviceSettingsAudio.h>
@@ -65,6 +68,43 @@ public:
         _cv.notify_all();
     }
 
+    void OnVolumeLevelChanged(const string& audioPort, const uint32_t& volumeLevel) override
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _lastVolumePort = audioPort;
+        _lastVolumeLevel = volumeLevel;
+        ++_volumeCount;
+        _cv.notify_all();
+    }
+
+    void OnMuteStatusChanged(const string& audioPort, const bool muted) override
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _lastMutePort = audioPort;
+        _lastMuted = muted;
+        ++_muteCount;
+        _cv.notify_all();
+    }
+
+    bool WaitForVolumeNotification(int timeoutMs = 2000)
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        return _cv.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                            [this] { return _volumeCount > 0; });
+    }
+
+    bool WaitForMuteNotification(int timeoutMs = 2000)
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        return _cv.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                            [this] { return _muteCount > 0; });
+    }
+
+    std::string LastVolumePort() const { std::lock_guard<std::mutex> lock(_mutex); return _lastVolumePort; }
+    uint32_t LastVolumeLevel() const { std::lock_guard<std::mutex> lock(_mutex); return _lastVolumeLevel; }
+    std::string LastMutePort() const { std::lock_guard<std::mutex> lock(_mutex); return _lastMutePort; }
+    bool LastMuted() const { std::lock_guard<std::mutex> lock(_mutex); return _lastMuted; }
+
     bool WaitForNotification(int timeoutMs = 2000)
     {
         std::unique_lock<std::mutex> lock(_mutex);
@@ -84,6 +124,12 @@ private:
     std::condition_variable _cv;
     bool _notified;
     std::atomic<unsigned int> _count;
+    unsigned int _volumeCount{0};
+    unsigned int _muteCount{0};
+    std::string _lastVolumePort;
+    uint32_t _lastVolumeLevel{0};
+    std::string _lastMutePort;
+    bool _lastMuted{false};
 };
 
 // ---------------------------------------------------------------------------
@@ -192,6 +238,13 @@ protected:
     static std::atomic<intptr_t> mLastAtmosQueryHandle;
     static std::atomic<unsigned int> mSetStereoModeCount;
 
+    // Volume/mute HAL state backing the dsGet/SetAudioLevel and dsSet/IsAudioMute mocks.
+    // mHalAudioFail makes those HAL calls return an error.
+    static std::atomic<float> mHalVolume;
+    static std::atomic<bool> mHalMuted;
+    static std::atomic<bool> mHalAudioFail;
+    static std::atomic<bool> mHalSetLevelFail; // fails dsSetAudioLevel only, so the preceding level read still succeeds
+    static std::atomic<unsigned int> mSetAudioLevelCount;
     // DeviceSettings audio COM-RPC client, used to drive IDeviceSettingsAudio::SetStereoMode
     Core::ProxyType<RPC::InvokeServerType<1, 0, 4>> mDsEngine;
     Core::ProxyType<RPC::CommunicatorClient>        mDsClient;
@@ -229,6 +282,11 @@ std::set<intptr_t> AudioOutputL2Test::mDisabledAudioPorts;
 std::set<intptr_t> AudioOutputL2Test::mDisconnectedAudioPorts;
 std::atomic<intptr_t> AudioOutputL2Test::mLastAtmosQueryHandle{0};
 std::atomic<unsigned int> AudioOutputL2Test::mSetStereoModeCount{0};
+std::atomic<float> AudioOutputL2Test::mHalVolume{0.0f};
+std::atomic<bool> AudioOutputL2Test::mHalMuted{false};
+std::atomic<bool> AudioOutputL2Test::mHalAudioFail{false};
+std::atomic<bool> AudioOutputL2Test::mHalSetLevelFail{false};
+std::atomic<unsigned int> AudioOutputL2Test::mSetAudioLevelCount{0};
 
 AudioOutputL2Test::AudioOutputL2Test()
     : L2TestMocks()
@@ -253,6 +311,11 @@ AudioOutputL2Test::AudioOutputL2Test()
     mSinkAtmosCapability = dsAUDIO_ATMOS_NOTSUPPORTED;
     mSinkAtmosQueryCount = 0;
     mLastAtmosQueryHandle = 0;
+    mHalVolume = 0.0f;
+    mHalMuted = false;
+    mHalAudioFail = false;
+    mHalSetLevelFail = false;
+    mSetAudioLevelCount = 0;
     {
         std::lock_guard<std::mutex> lock(mAudioPortStateMutex);
         mDisabledAudioPorts.clear();
@@ -396,6 +459,48 @@ void AudioOutputL2Test::ConfigureDeviceSettingsMocks()
     ON_CALL(*mDsAudioHalMock, dsAudioAtmosCapsChangeRegisterCB(_))
         .WillByDefault(Invoke([](dsAtmosCapsChangeCB_t cbFun) {
             mAtmosCapsChangeCB = cbFun;
+            return dsERR_NONE;
+        }));
+
+    // Volume and mute are backed by mHalVolume / mHalMuted; mHalAudioFail forces an error
+    ON_CALL(*mDsAudioHalMock, dsGetAudioLevel(_, _))
+        .WillByDefault(Invoke([](intptr_t, float* level) {
+            if (mHalAudioFail) {
+                return dsERR_GENERAL;
+            }
+            if (level) {
+                *level = mHalVolume.load();
+            }
+            return dsERR_NONE;
+        }));
+
+    ON_CALL(*mDsAudioHalMock, dsSetAudioLevel(_, _))
+        .WillByDefault(Invoke([](intptr_t, float level) {
+            if (mHalAudioFail || mHalSetLevelFail) {
+                return dsERR_GENERAL;
+            }
+            ++mSetAudioLevelCount;
+            mHalVolume = level;
+            return dsERR_NONE;
+        }));
+
+    ON_CALL(*mDsAudioHalMock, dsSetAudioMute(_, _))
+        .WillByDefault(Invoke([](intptr_t, bool mute) {
+            if (mHalAudioFail) {
+                return dsERR_GENERAL;
+            }
+            mHalMuted = mute;
+            return dsERR_NONE;
+        }));
+
+    ON_CALL(*mDsAudioHalMock, dsIsAudioMute(_, _))
+        .WillByDefault(Invoke([](intptr_t, bool* muted) {
+            if (mHalAudioFail) {
+                return dsERR_GENERAL;
+            }
+            if (muted) {
+                *muted = mHalMuted.load();
+            }
             return dsERR_NONE;
         }));
 }
@@ -1041,5 +1146,563 @@ TEST_F(AudioOutputL2Test, AtmosMetadata_Stb_HdmiPortAbsent_QueriesHostHandle)
     EXPECT_GT(mSinkAtmosQueryCount.load(), 0u) << "STB must query the sink Atmos capability";
     EXPECT_NE(HalAudioPortHandle(dsAUDIOPORT_TYPE_HDMI), mLastAtmosQueryHandle.load())
         << "HDMI0 is absent from the DeviceSettings config, so it must not be queried";
+}
+
+// ===========================================================================
+// Volume / mute APIs. SPEAKER0 is always present in the DeviceSettings config, so the
+// tests use it. The HAL state lives in mHalVolume / mHalMuted. SetMuted caches the last
+// value inside the plugin, so every mute test ends unmuted.
+// ===========================================================================
+TEST_F(AudioOutputL2Test, JsonRpc_SetVolumeLevel_Success_UpdatesHalAndNotifies)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalVolume = 30.0f;
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    params["volumeLevel"] = 50;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setVolumeLevel", params, result));
+    EXPECT_EQ(50.0f, mHalVolume.load()) << "The HAL must receive the new level";
+
+    ASSERT_TRUE(sink->WaitForVolumeNotification()) << "A changed level must notify observers";
+    EXPECT_EQ("SPEAKER0", sink->LastVolumePort());
+    EXPECT_EQ(50u, sink->LastVolumeLevel());
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_AboveMaximum_ReturnsInvalidParameter)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_INVALID_PARAMETER, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 101, success));
+    EXPECT_FALSE(success);
+    EXPECT_EQ(0u, mSetAudioLevelCount.load()) << "An invalid level must not reach the HAL";
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SameLevel_NoNotification)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalVolume = 50.0f;
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 50, success));
+    EXPECT_TRUE(success);
+    EXPECT_FALSE(sink->WaitForVolumeNotification(500)) << "An unchanged level must not notify";
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_HalError_ReportsFailure)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalAudioFail = true;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 40, success)); // failure is reported through success
+    EXPECT_FALSE(success);
+    EXPECT_FALSE(sink->WaitForVolumeNotification(500)) << "A failed set must not notify";
+    mHalAudioFail = false;
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_UnknownPort_ReportsFailure)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("FOO0", 40, success));
+    EXPECT_FALSE(success);
+    EXPECT_EQ(0u, mSetAudioLevelCount.load());
+}
+
+TEST_F(AudioOutputL2Test, JsonRpc_SetMuted_Success_UpdatesHalAndNotifies)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    params["muted"] = true;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setMuted", params, result));
+    EXPECT_TRUE(mHalMuted.load()) << "The HAL must receive the mute request";
+
+    ASSERT_TRUE(sink->WaitForMuteNotification()) << "A changed mute state must notify observers";
+    EXPECT_EQ("SPEAKER0", sink->LastMutePort());
+    EXPECT_TRUE(sink->LastMuted());
+
+    // Restore the unmuted state cached by the plugin
+    JsonObject unmuteParams, unmuteResult;
+    unmuteParams["audioPort"] = "SPEAKER0";
+    unmuteParams["muted"] = false;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "setMuted", unmuteParams, unmuteResult));
+    EXPECT_FALSE(mHalMuted.load());
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, JsonRpc_GetVolumeLevel_Success)
+{
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+    mHalVolume = 42.0f;
+
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "getVolumeLevel", params, result));
+    EXPECT_TRUE(result["success"].Boolean());
+    EXPECT_EQ("SPEAKER0", result["affectedAudioPort"].String());
+    EXPECT_EQ(42, static_cast<int>(result["volumeLevel"].Number()));
+}
+
+TEST_F(AudioOutputL2Test, JsonRpc_GetMuted_Success)
+{
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+    mHalMuted = true;
+
+    JsonObject params, result;
+    params["audioPort"] = "SPEAKER0";
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod(AUDIOOUTPUT_CALLSIGN, "getMuted", params, result));
+    EXPECT_TRUE(result["success"].Boolean());
+    EXPECT_EQ("SPEAKER0", result["affectedAudioPort"].String());
+    EXPECT_TRUE(result["muted"].Boolean());
+    mHalMuted = false;
+}
+
+// ===========================================================================
+// Error paths and the HDMI_ARC0 cache path of the volume / mute APIs
+// ===========================================================================
+
+// HDMI_ARC0 is answered from the cache filled by CEC, never from the HAL. With no CEC
+// event received the cached value is still the initial 0.
+TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_ArcPort_ReturnsCachedValueWithoutHal)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalVolume = 77.0f; // must not be returned for the ARC port
+    std::string affected;
+    int level = -1;
+    bool success = false;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetVolumeLevel("HDMI_ARC0", affected, level, success));
+    EXPECT_EQ("HDMI_ARC0", affected);
+    EXPECT_EQ(0, level);
+}
+
+// The level is read first, then set: only the set fails here.
+TEST_F(AudioOutputL2Test, ComRpc_SetVolumeLevel_SetHalError_ReportsFailureNoNotification)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalVolume = 10.0f;
+    mHalSetLevelFail = true;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetVolumeLevel("SPEAKER0", 40, success));
+    EXPECT_FALSE(success);
+    EXPECT_FALSE(sink->WaitForVolumeNotification(500)) << "A failed set must not notify";
+    mHalSetLevelFail = false;
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetMuted_HalError_ReportsFailureNoNotification)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalAudioFail = true;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetMuted("SPEAKER0", true, success));
+    EXPECT_FALSE(success);
+    EXPECT_FALSE(sink->WaitForMuteNotification(500)) << "A failed mute must not notify";
+    mHalAudioFail = false;
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_SetMuted_UnknownPort_ReportsFailure)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->SetMuted("FOO0", true, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_HalError_ReportsFailure)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalAudioFail = true;
+    std::string affected;
+    int level = 0;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetVolumeLevel("SPEAKER0", affected, level, success));
+    EXPECT_FALSE(success);
+    mHalAudioFail = false;
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetVolumeLevel_UnknownPort_ReportsFailure)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    std::string affected;
+    int level = 0;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetVolumeLevel("FOO0", affected, level, success));
+    EXPECT_FALSE(success);
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetMuted_HalError_ReportsFailure)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    mHalAudioFail = true;
+    std::string affected;
+    bool muted = false;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetMuted("SPEAKER0", affected, muted, success));
+    EXPECT_FALSE(success);
+    mHalAudioFail = false;
+}
+
+TEST_F(AudioOutputL2Test, ComRpc_GetMuted_UnknownPort_ReportsFailure)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    std::string affected;
+    bool muted = false;
+    bool success = true;
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->GetMuted("FOO0", affected, muted, success));
+    EXPECT_FALSE(success);
+}
+
+// ===========================================================================
+// HdmiCecSink driven notifications.
+//
+// The real HdmiCecSink (and PowerManager) plugins are activated, and CEC frames are injected
+// through the FrameListener HdmiCecSink registers on the mocked CEC connection. HdmiCecSink
+// then calls IHdmiCecSink::INotification on AudioOutput, exactly as on a device:
+//   Report Audio Status (0x7A)   -> ReportAudioStatusEvent        -> OnArcAudioStatusChanged
+//   Report Physical Address (0x84) from the audio system
+//                                -> ReportAudioDeviceConnectedStatus -> OnAudioDeviceConnectedStatusEventHandler
+//   Report Power Status (0x90)   -> ReportAudioDevicePowerStatus  -> Atmos re-evaluation
+//
+// AudioOutput looks HdmiCecSink up when it is configured, so it is re-activated after
+// HdmiCecSink is up. The plugin caches the ARC volume/mute in process-wide statics, so each
+// test leaves them at their initial values.
+// ===========================================================================
+class AudioOutputCecL2Test : public AudioOutputL2Test {
+protected:
+    AudioOutputCecL2Test();
+    ~AudioOutputCecL2Test() override;
+
+    std::vector<FrameListener*> mCecListeners;
+
+    void InjectCecFrame(const std::vector<uint8_t>& bytes);
+    void ResetArcCache();
+    bool WaitForArcVolume(int expected, int timeoutMs = 3000);
+};
+
+AudioOutputCecL2Test::AudioOutputCecL2Test()
+    : AudioOutputL2Test()
+{
+    {
+        std::ofstream restarted("/tmp/pwrmgr_restarted");
+        restarted << "2\n";
+    }
+    {
+        // HdmiCecSink persists "CEC disabled" when it is deactivated, which would leave CEC off for
+        // the next test. Reset the settings file so every test starts with CEC enabled.
+        std::ofstream cecData("/opt/persistent/ds/cecData_2.json");
+        cecData << "0\n";
+    }
+    // PowerManager and HdmiCecSink platform mocks, as in the HdmiCecSink L2 fixture.
+    // DeviceSettings stays active for the whole process and keeps PowerManager alive, so the HAL
+    // terminate calls may not happen before the mock is verified.
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_INIT())
+        .WillRepeatedly(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_INIT())
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_SetWakeupSrc(::testing::_, ::testing::_))
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_GetPowerState(::testing::_))
+        .WillRepeatedly(::testing::Invoke([](PWRMgr_PowerState_t* powerState) {
+            *powerState = PWRMGR_POWERSTATE_ON;
+            return PWRMGR_SUCCESS;
+        }));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_API_SetPowerState(::testing::_))
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_TERM())
+        .WillRepeatedly(::testing::Return(PWRMGR_SUCCESS));
+    EXPECT_CALL(*p_powerManagerHalMock, PLAT_DS_TERM())
+        .WillRepeatedly(::testing::Return(DEEPSLEEPMGR_SUCCESS));
+
+    ON_CALL(*p_rfcApiImplMock, getRFCParameter(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [](char*, const char* pcParameterName, RFC_ParamData_t* pstParamData) {
+                if (strcmp("RFC_DATA_ThermalProtection_POLL_INTERVAL", pcParameterName) == 0) {
+                    strcpy(pstParamData->value, "2");
+                    return WDMP_SUCCESS;
+                } else if (strcmp("RFC_ENABLE_ThermalProtection", pcParameterName) == 0) {
+                    strcpy(pstParamData->value, "true");
+                    return WDMP_SUCCESS;
+                } else if (strcmp("RFC_DATA_ThermalProtection_DEEPSLEEP_GRACE_INTERVAL", pcParameterName) == 0) {
+                    strcpy(pstParamData->value, "6");
+                    return WDMP_SUCCESS;
+                } else if (strcmp("Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.HdmiCecSink.CECVersion", pcParameterName) == 0) {
+                    strncpy(pstParamData->value, "1.4", sizeof(pstParamData->value));
+                    return WDMP_SUCCESS;
+                }
+                return WDMP_FAILURE;
+            }));
+
+    EXPECT_CALL(*p_mfrMock, mfrSetTempThresholds(::testing::_, ::testing::_))
+        .WillRepeatedly(::testing::Return(mfrERR_NONE));
+    EXPECT_CALL(*p_mfrMock, mfrGetTemperature(::testing::_, ::testing::_, ::testing::_))
+        .WillRepeatedly(::testing::Invoke(
+            [](mfrTemperatureState_t* curState, int* curTemperature, int* wifiTemperature) {
+                *curTemperature = 90;
+                *curState = (mfrTemperatureState_t)0;
+                *wifiTemperature = 25;
+                return mfrERR_NONE;
+            }));
+
+    ON_CALL(*p_connectionMock, poll(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Invoke(
+            [](const LogicalAddress&, const Throw_e&) {
+                throw CECNoAckException();
+            }));
+    EXPECT_CALL(*p_libCCECMock, getPhysicalAddress(::testing::_))
+        .WillRepeatedly(::testing::Invoke(
+            [](uint32_t* physAddress) {
+                *physAddress = (uint32_t)0x12345678;
+            }));
+    ON_CALL(*p_messageEncoderMock, encode(::testing::Matcher<const DataBlock&>(::testing::_)))
+        .WillByDefault(::testing::ReturnRef(CECFrame::getInstance()));
+    ON_CALL(*p_messageEncoderMock, encode(::testing::Matcher<const UserControlPressed&>(::testing::_)))
+        .WillByDefault(::testing::ReturnRef(CECFrame::getInstance()));
+    ON_CALL(*p_connectionMock, addFrameListener(::testing::_))
+        .WillByDefault([this](FrameListener* listener) {
+            mCecListeners.push_back(listener);
+        });
+    ON_CALL(*p_connectionMock, open()).WillByDefault(::testing::Return());
+    ON_CALL(*p_connectionMock, close()).WillByDefault(::testing::Return());
+
+    EXPECT_EQ(Core::ERROR_NONE, ActivateService("org.rdk.PowerManager"));
+    EXPECT_EQ(Core::ERROR_NONE, ActivateService("org.rdk.HdmiCecSink"));
+
+    // AudioOutput registers with HdmiCecSink in Configure(), so restart it now that the sink is active
+    if (mAudioOutputPlugin != nullptr) {
+        mAudioOutputPlugin->Release();
+        mAudioOutputPlugin = nullptr;
+    }
+    DeactivateService(AUDIOOUTPUT_CALLSIGN);
+    usleep(CLEANUP_DELAY_MICROSECONDS);
+    EXPECT_EQ(Core::ERROR_NONE, ActivateService(AUDIOOUTPUT_CALLSIGN));
+
+    // Let HdmiCecSink allocate its logical address and AudioOutput finish activating
+    usleep(DS_SETTLE_DELAY_MICROSECONDS * 3);
+}
+
+AudioOutputCecL2Test::~AudioOutputCecL2Test()
+{
+    if (mAudioOutputPlugin != nullptr) {
+        mAudioOutputPlugin->Release();
+        mAudioOutputPlugin = nullptr;
+    }
+    // AudioOutput unregisters from HdmiCecSink when it is deactivated, so it goes first
+    DeactivateService(AUDIOOUTPUT_CALLSIGN);
+
+    sleep(3);
+    EXPECT_EQ(Core::ERROR_NONE, DeactivateService("org.rdk.HdmiCecSink"));
+    EXPECT_EQ(Core::ERROR_NONE, DeactivateService("org.rdk.PowerManager"));
+
+    std::remove("/tmp/pwrmgr_restarted");
+}
+
+void AudioOutputCecL2Test::InjectCecFrame(const std::vector<uint8_t>& bytes)
+{
+    std::vector<uint8_t> buffer(bytes);
+    CECFrame frame(buffer.data(), buffer.size());
+    for (auto* listener : mCecListeners) {
+        if (listener != nullptr) {
+            listener->notify(frame);
+        }
+    }
+}
+
+// Report Audio Status with volume 0 and no mute brings the cached ARC state back to its initial value
+void AudioOutputCecL2Test::ResetArcCache()
+{
+    InjectCecFrame({ 0x50, 0x7A, 0x00 });
+    WaitForArcVolume(0);
+}
+
+bool AudioOutputCecL2Test::WaitForArcVolume(int expected, int timeoutMs)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (mAudioOutputPlugin != nullptr) {
+        std::string affected;
+        int level = -1;
+        bool success = false;
+        if (mAudioOutputPlugin->GetVolumeLevel("HDMI_ARC0", affected, level, success) == Core::ERROR_NONE
+            && level == expected) {
+            return true;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        usleep(100000);
+    }
+    return false;
+}
+
+// Report Audio Status 0x50: volume 80, not muted
+TEST_F(AudioOutputCecL2Test, Cec_ReportAudioStatus_NotifiesArcVolume)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    InjectCecFrame({ 0x50, 0x7A, 0x50 });
+
+    ASSERT_TRUE(sink->WaitForVolumeNotification(5000)) << "A new ARC volume must notify observers";
+    EXPECT_EQ("HDMI_ARC0", sink->LastVolumePort());
+    EXPECT_EQ(80u, sink->LastVolumeLevel());
+    EXPECT_FALSE(sink->WaitForMuteNotification(500)) << "Mute is unchanged, so it must not notify";
+    EXPECT_TRUE(WaitForArcVolume(80)) << "GetVolumeLevel(HDMI_ARC0) must return the cached value";
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+    ResetArcCache();
+}
+
+// Report Audio Status 0xD0: muted (bit 7), volume 80
+TEST_F(AudioOutputCecL2Test, Cec_ReportAudioStatus_Mute_NotifiesArcMute)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    InjectCecFrame({ 0x50, 0x7A, 0xD0 });
+
+    ASSERT_TRUE(sink->WaitForMuteNotification(5000)) << "A new ARC mute state must notify observers";
+    EXPECT_EQ("HDMI_ARC0", sink->LastMutePort());
+    EXPECT_TRUE(sink->LastMuted());
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+    ResetArcCache();
+}
+
+// A volume above 100 is rejected by AudioOutput
+TEST_F(AudioOutputCecL2Test, Cec_ReportAudioStatus_InvalidVolume_IsIgnored)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    auto sink = Core::ProxyType<AudioOutputNotificationSink>::Create();
+    EXPECT_EQ(Core::ERROR_NONE, mAudioOutputPlugin->Register(&(*sink)));
+
+    InjectCecFrame({ 0x50, 0x7A, 0x65 }); // volume 101
+
+    EXPECT_FALSE(sink->WaitForVolumeNotification(1000)) << "An out-of-range volume must be ignored";
+    EXPECT_TRUE(WaitForArcVolume(0));
+
+    mAudioOutputPlugin->Unregister(&(*sink));
+}
+
+// HdmiCecSink reports the audio system (logical address 5) as connected when it discovers it, which
+// resets AudioOutput's cached ARC state. The poll thread discovers it right after CEC is enabled, i.e.
+// before AudioOutput registers, so CEC is switched off and on again to trigger the discovery while
+// AudioOutput is listening.
+TEST_F(AudioOutputCecL2Test, Cec_AudioDeviceConnected_ResetsArcCache)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+
+    InjectCecFrame({ 0x50, 0x7A, 0x50 });
+    ASSERT_TRUE(WaitForArcVolume(80)) << "Precondition: the ARC volume must be cached";
+
+    // Disabling CEC deletes the connection and its frame listener
+    mCecListeners.clear();
+
+    JsonObject params, result;
+    params["enabled"] = false;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod("org.rdk.HdmiCecSink", "setEnabled", params, result));
+
+    params.Clear();
+    result.Clear();
+    params["enabled"] = true;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod("org.rdk.HdmiCecSink", "setEnabled", params, result));
+
+
+    EXPECT_TRUE(WaitForArcVolume(0, 10000)) << "The audio device connection must reset the cached ARC volume";
+}
+
+// The audio system's power status is reported once HdmiCecSink has been asked for it. AudioOutput
+// reacts to the first report by re-reading the sink Atmos capability.
+TEST_F(AudioOutputCecL2Test, Cec_ReportPowerStatus_ReevaluatesAtmos)
+{
+    ASSERT_EQ(Core::ERROR_NONE, CreateAudioOutputInterfaceObjectUsingComRPCConnection());
+    ASSERT_NE(mAudioOutputPlugin, nullptr);
+    ASSERT_FALSE(mCecListeners.empty()) << "HdmiCecSink did not register a CEC frame listener";
+    usleep(DS_SETTLE_DELAY_MICROSECONDS);
+
+    JsonObject params, result;
+    EXPECT_EQ(Core::ERROR_NONE, InvokeServiceMethod("org.rdk.HdmiCecSink", "requestAudioDevicePowerStatus", params, result));
+
+    mSinkAtmosCapability = dsAUDIO_ATMOS_ATMOSMETADATA;
+    mSinkAtmosQueryCount = 0;
+
+    InjectCecFrame({ 0x50, 0x90, 0x01 }); // standby
+    InjectCecFrame({ 0x50, 0x90, 0x00 }); // on
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (mSinkAtmosQueryCount.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+        usleep(100000);
+    }
+    EXPECT_GT(mSinkAtmosQueryCount.load(), 0u) << "The first power status report must re-read the sink Atmos capability";
 }
 
